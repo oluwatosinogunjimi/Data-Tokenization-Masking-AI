@@ -1,10 +1,11 @@
 // Masking test cases. Every value here is fictional: example domains, documentation IP ranges
 // (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32), private ranges and published test card numbers.
 //
-// Each case: { name, in, leak, keep, same?, todo? }
+// Each case: { name, in, leak, keep, same?, opts?, todo? }
 //   leak  strings that must NOT appear in the masked output
 //   keep  strings that MUST still appear (false-positive guard)
 //   same  a label prefix (e.g. 'TENANT_') whose tokens must all be the same token
+//   opts  page options for this case, e.g. { keepEmailDomain: true }
 //   todo  a known gap with the reason; the runner reports these separately and fails if one starts passing
 'use strict';
 module.exports = [
@@ -18,7 +19,7 @@ module.exports = [
   {"name":"user after a path ending in exe","in":"Image: C:\\Tools\\run.exe CORP\\alice launched","leak":["alice"],"keep":[]},
   {"name":"two accounts in a row","in":"logon by CORP\\jdoe CORP\\asmith","leak":["jdoe","asmith"],"keep":[]},
   {"name":"dotted username masked","in":"Account CORP\\jane.doe logged on","leak":["jane.doe"],"keep":[]},
-  {"name":"machine account masked","in":"Account CORP\\WS-01$ ","leak":["WS-01"],"keep":[]},
+  {"name":"machine account masked","in":"Account CORP\\WS-01$ ","leak":["WS-01"],"keep":["$"]},
   {"name":"all-digit GUID","in":"ObjectId {11112222-3333-4444-5555-666677778888} done","leak":["11112222","666677778888","[CARD","[PHONE"],"keep":["{","} done"]},
   {"name":"IMEI not a card","in":"IMEI 490154203237518 seen","leak":[],"keep":["490154203237518"]},
   {"name":"Luhn-valid non-card IDs kept","in":"serial 1234567890123 ref 79927398713000","leak":[],"keep":["1234567890123"]},
@@ -42,7 +43,7 @@ module.exports = [
   {"name":"nxc -p","in":"nxc smb 10.0.0.0/24 -u users.txt -p Spring2026","leak":["Spring2026"],"keep":["users.txt"]},
   {"name":"sqlcmd -P","in":"sqlcmd -S db -U sa -P Sql!Pass1 -Q \"select 1\"","leak":["Sql!Pass1"],"keep":["select 1"]},
   {"name":"curl -u","in":"curl -u admin:Hunter2pass https://api.example.com/v1/items","leak":["Hunter2pass"],"keep":["curl -u admin:","api.example.com"]},
-  {"name":"curl --user quoted","in":"curl --user \"bob:pa55word\" http://198.51.100.9/x","leak":["pa55word"],"keep":["bob:"]},
+  {"name":"curl --user quoted","in":"curl --user \"bob:pa55word\" http://198.51.100.9/x","leak":["pa55word"],"keep":["curl --user \"","\" http"]},
   {"name":"mysql -pX","in":"mysql -u root -pS3cr3tDb -h db01 appdb","leak":["S3cr3tDb"],"keep":["-h db01 appdb"]},
   {"name":"schtasks /rp","in":"schtasks /create /tn Upd /tr c:\\x.exe /ru EXAMPLE\\svc_sched /rp Autumn#2026 /sc daily","leak":["Autumn#2026","svc_sched"],"keep":["/sc daily"]},
   {"name":"wmic /password:","in":"wmic /node:10.0.0.4 /user:admin /password:Wm1cPass! process list","leak":["Wm1cPass!"],"keep":["process list"]},
@@ -76,7 +77,7 @@ module.exports = [
   {"name":"mysql -P port","in":"mysql -h db -P 3306 -u app -p appdb","leak":[],"keep":["-P 3306","-p appdb"]},
   {"name":"psexec -priority flag","in":"psexec -priority 4 cmd","leak":[],"keep":["-priority 4"]},
   {"name":"net user in prose","in":"They ran net user to list accounts on the host.","leak":[],"keep":["net user to list accounts"]},
-  {"name":"net user query","in":"net user jdoe /domain","leak":[],"keep":["net user jdoe /domain"]},
+  {"name":"net user query","in":"net user jdoe /domain","leak":[],"keep":["net user ","/domain"]},
   {"name":"variables not secrets","in":"net user x $pw /add ; curl -u u:$TOKEN https://a ; -Password $secure ; sqlcmd -P %PW%","leak":[],"keep":["$pw","$TOKEN","$secure","%PW%"]},
   {"name":"placeholder in docs","in":"Usage: psexec -p <password> and net user NAME * /add","leak":[],"keep":["<password>","* /add"]},
   {"name":"SecureString variable","in":"-AccountPassword (ConvertTo-SecureString $p -AsPlainText -Force)","leak":[],"keep":["(ConvertTo-SecureString $p"]},
@@ -85,8 +86,37 @@ module.exports = [
   {"name":"generic cloud domains","in":"login.microsoftonline.com graph.microsoft.com management.azure.com core.windows.net","leak":[],"keep":["login.microsoftonline.com graph.microsoft.com management.azure.com core.windows.net"]},
   {"name":"Windows paths unchanged","in":"C:\\Windows\\System32\\cmd.exe and HKCU\\Software\\X and NT AUTHORITY\\SYSTEM","leak":[],"keep":["C:\\Windows\\System32\\cmd.exe","HKCU\\Software","NT AUTHORITY\\SYSTEM"]},
 
+  // ---- Account, host and name fields; learned email domains; re-masking ----
+  {"name":"same user via field and prose","in":"Account Name: aokonkwo\nLater aokonkwo signed in again.","leak":["aokonkwo"],"keep":["Later ","signed in again."],"same":"USER_"},
+  {"name":"machine account and workstation share a token","in":"Account Name: CORP\\WS-0042$ Workstation Name: WS-0042","leak":["WS-0042"],"keep":["$"],"same":"HOST_"},
+  {"name":"trailing full stop kept outside the token","in":"by user CORP\\g.hughes.","leak":["g.hughes"],"keep":["]."]},
+  {"name":"email domain learned for URLs and headers","in":"From: jdoe@contoso.com\nLink: https://intranet.contoso.com/x and contoso.com","leak":["contoso"],"keep":["https://","/x and "]},
+  {"name":"webmail domains are not learned","in":"From: someone@gmail.com\nSee https://mail.google.com/x","leak":["someone"],"keep":["https://mail.google.com/x"]},
+  {"name":"keep email domain: nothing learned","in":"From: jdoe@contoso.com\nLink: https://contoso.com/x","leak":["jdoe"],"keep":["@contoso.com","https://contoso.com/x"],"opts":{"keepEmailDomain":true}},
+  {"name":"display name propagates","in":"Display Name: Chinedu Eze\nApproved by Chinedu Eze today.","leak":["Chinedu","Eze"],"keep":["Approved by ","today."],"same":"PERSON_"},
+  {"name":"sudo log","in":"Nov 10 04:00:01 app-07 sudo:   jdoe : TTY=pts/0 ; PWD=/home/jdoe ; USER=root ; COMMAND=/bin/bash","leak":["jdoe","app-07"],"keep":["USER=root","COMMAND=/bin/bash"]},
+  {"name":"pam session and invalid user","in":"pam_unix(sshd:session): session opened for user deployer by (uid=0)\nInvalid user tester from 203.0.113.5 port 4022","leak":["deployer","tester"],"keep":["(uid=0)","port 4022"]},
+  {"name":"ISO syslog host","in":"2026-11-10T03:12:44Z app-07 nginx[12]: GET /health 200","leak":["app-07"],"keep":["nginx[12]: GET /health 200"]},
+  {"name":"CEF users and hosts","in":"CEF:0|Vendor|FW|1.0|100|Blocked|5|suser=jdoe duser=asmith dhost=app01 shost=ws-114","leak":["jdoe","asmith","app01","ws-114"],"keep":["CEF:0|Vendor|FW|1.0|100|Blocked|5|"]},
+  {"name":"JSON UserName and HostName","in":"{\"UserName\":\"t.ade\",\"HostName\":\"db-02\",\"Port\":5432}","leak":["t.ade","db-02"],"keep":["\"Port\":5432"]},
+  {"name":"domain field with FQDN","in":"TargetDomainName: corp.example.org Status: 0x0","leak":["corp.example.org"],"keep":["Status: 0x0"]},
+  {"name":"honorifics","in":"Spoke to Mrs Funmi Akande and Dr. Okafor.","leak":["Funmi Akande","Okafor"],"keep":["Spoke to Mrs ","Dr. "]},
+  {"name":"net localgroup add","in":"net localgroup administrators svc_temp /add","leak":["svc_temp"],"keep":["net localgroup administrators ","/add"]},
+  {"name":"runas and schtasks users","in":"runas /user:helpdesk1 cmd ; schtasks /create /ru svc_sched /tn x","leak":["helpdesk1","svc_sched"],"keep":["/tn x"]},
+  {"name":"psql and hydra users","in":"psql -h db -U appuser -d app ; hydra -l jsmith -P list.txt ssh://10.0.0.1","leak":["appuser","jsmith"],"keep":["-d app","-P list.txt"]},
+  {"name":"empty and built-in account fields","in":"Account Name: - Account Domain: - Account Name: SYSTEM Account Domain: NT AUTHORITY","leak":[],"keep":["Account Name: - Account Domain: -","SYSTEM","NT AUTHORITY"]},
+  {"name":"log level is not a host","in":"2026-11-10 09:00:00 INFO main: started","leak":[],"keep":["INFO main: started"]},
+  {"name":"device and server words in prose","in":"Windows Server 2019 on the host header, server-side check, machine learning model","leak":[],"keep":["Windows Server 2019 on the host header, server-side check, machine learning model"]},
+  {"name":"public destination hosts kept","in":"DestinationHostName: www.example.com host=cdn.example.net dhost=api.example.org","leak":[],"keep":["www.example.com","cdn.example.net","api.example.org"]},
+  {"name":"internal destination host masked","in":"DestinationHostName: files01.corp.local","leak":["files01","corp.local"],"keep":["DestinationHostName: "]},
+  {"name":"azure conn string AccountName is storage","in":"DefaultEndpointsProtocol=https;AccountName=appstore77;AccountKey=abcdEFGH1234==","leak":["appstore77"],"keep":[],"same":"AZ_STORAGE_"},
+  {"name":"short account only re-masked with same case","in":"Account Domain: FINCO\nFinco is the name of the project.","leak":["FINCO"],"keep":["Finco is the name"]},
+  {"name":"common words never re-masked","in":"user=backup\nRun the backup tonight.","leak":[],"keep":["Run the backup tonight."]},
+  {"name":"usernames inside hashes and paths untouched","in":"Account Name: abc1\nsha1 9abc1def0000 path /opt/abc1x/bin","leak":[],"keep":["9abc1def0000","/opt/abc1x/bin"]},
+  {"name":"mail display needs a masked address","in":"Re: Quarterly Report <draft>","leak":[],"keep":["Quarterly Report <draft>"]},
+
   // ---- Mixed log formats and false-positive bait ----
-  {"name":"net user add (corpus)","in":"CommandLine: net user svc_backup Pass123! /add","leak":["Pass123!","svc_backup"],"keep":["net user","/add"],"todo":"planned: user, host and name fields in key:value logs"},
+  {"name":"net user add (corpus)","in":"CommandLine: net user svc_backup Pass123! /add","leak":["Pass123!","svc_backup"],"keep":["net user","/add"]},
   {"name":"net use /user","in":"net use \\\\fileserver01\\c$ /user:EXAMPLE\\jdoe S3cretPw!","leak":["S3cretPw!","jdoe","fileserver01"],"keep":[]},
   {"name":"psexec -u -p","in":"psexec.exe \\\\10.0.0.5 -u EXAMPLE\\adm_okoro -p Summer2026# cmd.exe","leak":["Summer2026#","adm_okoro"],"keep":["psexec.exe","cmd.exe"]},
   {"name":"curl -u (corpus)","in":"curl -u admin:Hunter2pass https://api.example.com/v1/items","leak":["Hunter2pass"],"keep":["curl"]},
@@ -112,18 +142,18 @@ module.exports = [
   {"name":"x-api-key header","in":"X-Api-Key: 5c4d3e2f1a0b9c8d7e6f5a4b","leak":["5c4d3e2f1a0b9c8d7e6f5a4b"],"keep":[]},
   {"name":"Azure client secret","in":"ClientSecret: Abc8Q~xYz0123456789abcdefGHIJKLmnopqRS","leak":["Abc8Q~xYz0123456789abcdefGHIJKLmnopqRS"],"keep":[]},
   {"name":"Azure secret no key","in":"found secret value Abc8Q~xYz0123456789abcdefGHIJKLmnopqRS in script","leak":["Abc8Q~xYz0123456789abcdefGHIJKLmnopqRS"],"keep":[]},
-  {"name":"4624 block","in":"EventID 4624 An account was successfully logged on.\nSubject: Security ID: S-1-5-18 Account Name: WS-0042$ Account Domain: EXAMPLE\nLogon Type: 3\nNew Logon: Security ID: S-1-5-21-1004336348-1177238915-682003330-1105 Account Name: aokonkwo Account Domain: EXAMPLE\nWorkstation Name: WS-0042\nSource Network Address: 10.20.1.15 Source Port: 52344\nLogon Process: NtLmSsp Authentication Package: NTLM","leak":["aokonkwo","WS-0042","1004336348-1177238915-682003330"],"keep":["4624","Logon Type: 3","S-1-5-18","-1105","52344","NTLM"],"todo":"planned: user, host and name fields in key:value logs"},
-  {"name":"4625 failed","in":"4625 An account failed to log on. Account For Which Logon Failed: Account Name: b.adeyemi Account Domain: EXAMPLE Failure Reason: Unknown user name or bad password. Status: 0xC000006D Sub Status: 0xC000006A Source Network Address: 203.0.113.77","leak":["b.adeyemi","203.0.113.77"],"keep":["0xC000006D","0xC000006A","4625"],"todo":"planned: user, host and name fields in key:value logs"},
+  {"name":"4624 block","in":"EventID 4624 An account was successfully logged on.\nSubject: Security ID: S-1-5-18 Account Name: WS-0042$ Account Domain: EXAMPLE\nLogon Type: 3\nNew Logon: Security ID: S-1-5-21-1004336348-1177238915-682003330-1105 Account Name: aokonkwo Account Domain: EXAMPLE\nWorkstation Name: WS-0042\nSource Network Address: 10.20.1.15 Source Port: 52344\nLogon Process: NtLmSsp Authentication Package: NTLM","leak":["aokonkwo","WS-0042","1004336348-1177238915-682003330"],"keep":["4624","Logon Type: 3","S-1-5-18","-1105","52344","NTLM"]},
+  {"name":"4625 failed","in":"4625 An account failed to log on. Account For Which Logon Failed: Account Name: b.adeyemi Account Domain: EXAMPLE Failure Reason: Unknown user name or bad password. Status: 0xC000006D Sub Status: 0xC000006A Source Network Address: 203.0.113.77","leak":["b.adeyemi","203.0.113.77"],"keep":["0xC000006D","0xC000006A","4625"]},
   {"name":"4688","in":"4688 New Process Name: C:\\Windows\\System32\\cmd.exe Creator Process Name: C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE Process Command Line: cmd.exe /c whoami Token Elevation Type: %%1936 New Process ID: 0x1a2c","leak":[],"keep":["C:\\Windows\\System32\\cmd.exe","Office16","%%1936","0x1a2c"]},
-  {"name":"4720 user created","in":"4720 A user account was created. Subject: Account Name: it.admin1 Account Domain: EXAMPLE New Account: Account Name: temp_usr SAM Account Name: temp_usr Display Name: Chinedu Eze User Principal Name: temp_usr@example.local","leak":["it.admin1","temp_usr","Chinedu Eze"],"keep":["4720"],"todo":"planned: user, host and name fields in key:value logs"},
+  {"name":"4720 user created","in":"4720 A user account was created. Subject: Account Name: it.admin1 Account Domain: EXAMPLE New Account: Account Name: temp_usr SAM Account Name: temp_usr Display Name: Chinedu Eze User Principal Name: temp_usr@example.local","leak":["it.admin1","temp_usr","Chinedu Eze"],"keep":["4720"]},
   {"name":"CSV log row","in":"TimeGenerated,Computer,Account,IpAddress\n2026-11-09T22:01:13.123Z,WKS-0199.corp.example.local,EXAMPLE\\tolu.ade,10.40.2.9","leak":["WKS-0199","tolu.ade","10.40.2.9"],"keep":["2026-11-09T22:01:13.123Z"]},
-  {"name":"hostname not DESKTOP- prefix","in":"DeviceName: office-ws017 ; RemoteDeviceName: SITE2-DC01 ; Computer: APP-SQL-02","leak":["office-ws017","SITE2-DC01","APP-SQL-02"],"keep":["DeviceName"],"todo":"planned: user, host and name fields in key:value logs"},
-  {"name":"JSON keys","in":"{\"AccountName\":\"mbello\",\"AccountUpn\":\"mbello@example.org\",\"DeviceName\":\"hq-ws-114\",\"InitiatingProcessAccountName\":\"mbello\",\"RemoteIP\":\"203.0.113.52\"}","leak":["mbello","hq-ws-114","203.0.113.52"],"keep":["AccountName","RemoteIP"],"todo":"planned: user, host and name fields in key:value logs"},
-  {"name":"sign-in log","in":"UserPrincipalName: f.nwosu@example.onmicrosoft.com UserDisplayName: Folake Nwosu AppDisplayName: Office 365 Exchange Online ResultType: 50126 IPAddress: 2001:db8:f400:7c1c::5 Location: GB ConditionalAccessStatus: failure CorrelationId: 9c1e8a7b-1d2e-4f3a-8b9c-0d1e2f3a4b5c","leak":["f.nwosu","Folake Nwosu","2001:db8:f400:7c1c::5","9c1e8a7b"],"keep":["50126","Office 365","GB"],"todo":"planned: user, host and name fields in key:value logs"},
-  {"name":"endpoint log line","in":"Event: PowerShell command line on device ws-0081.example.co.uk by user EXAMPLE\\g.hughes. SHA256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 MD5 098f6bcd4621d373cade4e832627b4f6 SHA1 a94a8fe5ccb19ba61c4c0873d391e987982fbbd3","leak":["ws-0081","g.hughes"],"keep":["9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08","098f6bcd4621d373cade4e832627b4f6","a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"],"todo":"planned: user, host and name fields in key:value logs"},
-  {"name":"auth.log","in":"Nov 10 03:12:44 web-03 sshd[24117]: Failed password for invalid user oracle from 203.0.113.185 port 51122 ssh2\nNov 10 03:12:50 web-03 sshd[24120]: Accepted publickey for deployer from 10.8.0.6 port 40022 ssh2: RSA SHA256:abcDEF123ghiJKL456mnoPQR789stuVWX0yzABCdefGHI","leak":["web-03","deployer","203.0.113.185"],"keep":["sshd[24117]","51122","oracle"],"todo":"planned: user, host and name fields in key:value logs"},
-  {"name":"firewall","in":"date=2026-11-10 time=03:22:11 devname=\"FW-HQ-01\" srcip=10.10.5.23 srcport=55123 dstip=198.51.100.104 dstport=443 proto=6 action=\"deny\" user=\"kemi.o\" policyid=12","leak":["FW-HQ-01","10.10.5.23","kemi.o"],"keep":["dstport=443","policyid=12","2026-11-10","03:22:11"],"todo":"planned: user, host and name fields in key:value logs"},
-  {"name":"email headers","in":"From: \"Ngozi Obi\" <ngozi.obi@example.org>\nTo: accounts@example.org\nReceived: from mail-out.example.org (mail-out.example.org [198.51.100.196]) by mx.example.net\nMessage-ID: <CAF1234abcd@mail.example.org>\nX-Originating-IP: [203.0.113.102]","leak":["Ngozi Obi","ngozi.obi","accounts@","198.51.100.196","203.0.113.102","example.org"],"keep":["Received:"],"todo":"planned: user, host and name fields in key:value logs"},
+  {"name":"hostname not DESKTOP- prefix","in":"DeviceName: office-ws017 ; RemoteDeviceName: SITE2-DC01 ; Computer: APP-SQL-02","leak":["office-ws017","SITE2-DC01","APP-SQL-02"],"keep":["DeviceName"]},
+  {"name":"JSON keys","in":"{\"AccountName\":\"mbello\",\"AccountUpn\":\"mbello@example.org\",\"DeviceName\":\"hq-ws-114\",\"InitiatingProcessAccountName\":\"mbello\",\"RemoteIP\":\"203.0.113.52\"}","leak":["mbello","hq-ws-114","203.0.113.52"],"keep":["AccountName","RemoteIP"]},
+  {"name":"sign-in log","in":"UserPrincipalName: f.nwosu@example.onmicrosoft.com UserDisplayName: Folake Nwosu AppDisplayName: Office 365 Exchange Online ResultType: 50126 IPAddress: 2001:db8:f400:7c1c::5 Location: GB ConditionalAccessStatus: failure CorrelationId: 9c1e8a7b-1d2e-4f3a-8b9c-0d1e2f3a4b5c","leak":["f.nwosu","Folake Nwosu","2001:db8:f400:7c1c::5","9c1e8a7b"],"keep":["50126","AppDisplayName: Office 365","GB"]},
+  {"name":"endpoint log line","in":"Event: PowerShell command line on device ws-0081.example.co.uk by user EXAMPLE\\g.hughes. SHA256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 MD5 098f6bcd4621d373cade4e832627b4f6 SHA1 a94a8fe5ccb19ba61c4c0873d391e987982fbbd3","leak":["ws-0081","g.hughes"],"keep":["9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08","098f6bcd4621d373cade4e832627b4f6","a94a8fe5ccb19ba61c4c0873d391e987982fbbd3"]},
+  {"name":"auth.log","in":"Nov 10 03:12:44 web-03 sshd[24117]: Failed password for invalid user oracle from 203.0.113.185 port 51122 ssh2\nNov 10 03:12:50 web-03 sshd[24120]: Accepted publickey for deployer from 10.8.0.6 port 40022 ssh2: RSA SHA256:abcDEF123ghiJKL456mnoPQR789stuVWX0yzABCdefGHI","leak":["web-03","deployer","203.0.113.185"],"keep":["sshd[24117]","51122","oracle"]},
+  {"name":"firewall","in":"date=2026-11-10 time=03:22:11 devname=\"FW-HQ-01\" srcip=10.10.5.23 srcport=55123 dstip=198.51.100.104 dstport=443 proto=6 action=\"deny\" user=\"kemi.o\" policyid=12","leak":["FW-HQ-01","10.10.5.23","kemi.o"],"keep":["dstport=443","policyid=12","2026-11-10","03:22:11"]},
+  {"name":"email headers","in":"From: \"Ngozi Obi\" <ngozi.obi@example.org>\nTo: accounts@example.org\nReceived: from mail-out.example.org (mail-out.example.org [198.51.100.196]) by mx.example.net\nMessage-ID: <CAF1234abcd@mail.example.org>\nX-Originating-IP: [203.0.113.102]","leak":["Ngozi Obi","ngozi.obi","accounts@","198.51.100.196","203.0.113.102","example.org"],"keep":["Received:"]},
   {"name":"free-text names","in":"Met Mr. Adebayo Ogundipe (Head of IT) and John Smith at the workshop. Spoke to Mrs Funmi Akande. Per Sarah, the build passed.","leak":["Adebayo Ogundipe","John Smith","Funmi Akande","Sarah"],"keep":["Head of IT"],"todo":"planned: review panel for likely misses in free text"},
   {"name":"username in prose","in":"The user aokonkwo logged in from a new device; account svc-sql-app also failed.","leak":["aokonkwo","svc-sql-app"],"keep":[],"todo":"planned: review panel for likely misses in free text"},
   {"name":"NG phones","in":"Phone: 08031234567, +2348031234567, 0803 123 4567, +234 (0) 803 123 4567, 07012345678, 09087654321","leak":["08031234567","2348031234567","0803 123 4567","803 123 4567","07012345678","09087654321"],"keep":[]},

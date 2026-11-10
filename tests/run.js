@@ -11,10 +11,9 @@ const gaps = [];
 const fail = (name, why, out) => { failed++; console.log(`FAIL  ${name}\n      ${why}` + (out !== undefined ? `\n      out: ${out}` : '')); };
 const ok = (name, out) => { passed++; if (verbose) console.log(`ok    ${name}` + (out !== undefined ? `\n      ${out}` : '')); };
 
-// ---- 1. Masking cases ----
-const page = loadPage({ domains: ['example.local', 'corp.example.local'] });
+// ---- 1. Masking cases (a fresh page per case, so what one case learns can't change another) ----
 for (const c of cases){
-  const out = page.mask(c.in);
+  const out = loadPage(Object.assign({ domains: ['example.local', 'corp.example.local'] }, c.opts)).mask(c.in);
   const problems = [
     ...c.leak.filter(v => out.includes(v)).map(v => `leaked: ${v}`),
     ...c.keep.filter(v => !out.includes(v)).map(v => `lost: ${v}`),
@@ -56,7 +55,21 @@ for (const c of cases){
   }
 }
 
-// ---- 3. Built-in sample round trip ----
+// ---- 3. Session: a second paste reuses tokens and learned domains ----
+{
+  const p = loadPage();
+  const first = p.mask('Account Name: aokonkwo from jdoe@contoso.com on WS-0042');
+  const second = p.mask('aokonkwo opened https://portal.contoso.com today');
+  const tok = (first.match(/\[USER_\d+\]/) || [])[0];
+  const problems = [];
+  if (!tok || !second.includes(tok)) problems.push(`user token not reused: ${tok}`);
+  if (second.includes('contoso')) problems.push('learned domain not applied to the second paste');
+  p.clear();
+  if (p.mask('portal.contoso.com').includes('[')) problems.push('Clear mapping did not forget the learned domain');
+  problems.length ? fail('session reuse', problems.join('; '), second) : ok('session reuse', second);
+}
+
+// ---- 4. Built-in sample round trip ----
 {
   const p = loadPage();
   const { input, output } = p.sample();
@@ -70,7 +83,7 @@ for (const c of cases){
   else ok('sample round trip');
 }
 
-// ---- 4. Performance (worst-case inputs that once froze the page) ----
+// ---- 5. Performance (worst-case inputs that once froze the page) ----
 {
   const p = loadPage();
   const LIMIT_MS = 2000;

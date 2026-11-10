@@ -36,7 +36,7 @@ flowchart LR
   J -.-> S
 ```
 
-1. **Mask.** `readCfg()` captures the settings. `maskText()` resets the placeholder list and per-run counts, then runs each enabled detector over the text in order. Every match goes through `mk()`, which returns a placeholder. When all detectors are done, the placeholders are expanded into their visible tokens.
+1. **Mask.** `readCfg()` captures the settings. `maskText()` resets the placeholder list and per-run counts, learns organisation domains from the email addresses in the text, then runs each enabled detector over the text in order. Every match goes through `mk()`, which returns a placeholder. When all detectors are done, the placeholders are expanded into their visible tokens.
 2. **Copy.** The masked text is copied and pasted into an AI chat by the user. The page itself sends nothing anywhere.
 3. **Restore.** The AI reply is pasted back. `restoreText()` replaces every token it knows with the original value. Tokens it doesn't know, and one-way tokens, are left as they are.
 4. **Clear.** "Clear mapping" (or closing the tab) empties the session store. After that, earlier masked text can no longer be restored.
@@ -45,15 +45,15 @@ flowchart LR
 
 A token is `[LABEL_n]`: an upper-case label and a counter that is separate per label, for example `[USER_3]` or `[PRIVATE_IP_12]`. Card tokens carry the last four digits as a suffix: `[CARD_2:****1111]`.
 
-- **Consistent.** The same value always gets the same token for the life of the tab, across every Mask run, so correlation survives ("the same user on two hosts").
+- **Consistent.** The same value always gets the same token for the life of the tab, across every Mask run, so correlation survives ("the same user on two hosts"). Once a user, host or name has a token, the re-masking step gives it the same token wherever else it appears, even where no detector would have found it.
 - **Normalised.** Values are compared after normalisation, so variants share a token: case for most values, digits only for phones (with `+234`/`+44` folded to a leading `0`), `:` separators for MACs, `.` for defanged IPs (`1.2.3[.]4`).
-- **Signal-preserving.** Labels keep the type, and some detectors keep structure outside the token: the RID of a domain SID (`S-1-5-21-[DOMAIN_SID_1]-500`), the last four card digits, the private vs public IP label, the service suffix of a cloud resource (`[AZ_STORAGE_1].blob.core.windows.net`), and the `-my` of a OneDrive host.
+- **Signal-preserving.** Labels keep the type, and some detectors keep structure outside the token: the RID of a domain SID (`S-1-5-21-[DOMAIN_SID_1]-500`), the last four card digits, the private vs public IP label, the service suffix of a cloud resource (`[AZ_STORAGE_1].blob.core.windows.net`), the `-my` of a OneDrive host, and the `$` of a machine account (`[HOST_1]$`, which shares its token with the same name in a `Workstation Name:` field).
 
 ### Reversible and one-way
 
 | Mode | Stored | Restorable | Used for |
 |---|---|---|---|
-| Reversible | Original value in the reverse map | Yes | Identifiers you want back in the reply: users, emails, hosts, IPs, GUIDs, phones, account numbers, custom terms. |
+| Reversible | Original value in the reverse map | Yes | Identifiers you want back in the reply: users, names, emails, hosts, IPs, GUIDs, phones, account numbers, custom terms. |
 | One-way | A 32-bit FNV-1a hash of the normalised value, used only to keep the token consistent | No | Secrets and high-risk numbers: keys, tokens, passwords, card numbers, BVN, NIN. The mapping table shows "not stored (one-way)". |
 
 ## Session store
@@ -64,6 +64,7 @@ S = {
   rev:  Map<"[LABEL_n]", original value>                             // token -> value (reversible only)
   cnt:  { LABEL: n }                                                  // last number used per label
   rows: [{ token, orig | null }]                                      // mapping table, in creation order
+  learned: Set<domain>                                                // organisation domains learned from emails
 }
 ```
 
@@ -83,7 +84,7 @@ No detector pattern matches those characters, and value classes that could other
 
 ## Detectors
 
-Detectors run in this order. Earlier means more specific: secrets go first so a password is never half-matched as a hostname, and GUIDs go before phones and cards because an all-digit GUID segment looks like a number.
+Detectors run in this order. Earlier means more specific: secrets go first so a password is never half-matched as a hostname, GUIDs go before phones and cards because an all-digit GUID segment looks like a number, and usernames in command lines are found after the passwords next to them are already masked.
 
 | # | Group (toggle) | Labels | What it matches | Mode |
 |---|---|---|---|---|
@@ -103,21 +104,39 @@ Detectors run in this order. Earlier means more specific: secrets go first so a 
 | 5 | Phone numbers | `PHONE` | Nigerian mobile, UK mobile, and `+country` numbers, 10–15 digits | Reversible |
 | 6 | Card numbers | `CARD` (`:****last4`) | 13–19 digits with a known card prefix (IIN) and a valid Luhn check | One-way |
 | 7 | Emails and UPNs | `EMAIL`, or `USER` with "keep email domain" | `name@example.com`-style addresses, with bounded repeats | Reversible |
-| 8 | Usernames | `USER`, `NETBIOS` | `C:\Users\NAME`, `/home/NAME`, `/Users/NAME`, `DOMAIN\NAME` (skips well-known domains, file names and folders inside spaced paths) | Reversible |
-| 9 | Hostnames and cloud resource names | `HOST`, `ORG_DOMAIN` | Anything under a listed internal domain; `\\host\share`; `DESKTOP-`, `LAPTOP-`, `WIN-`, `SRV-` names | Reversible |
+| 8 | Usernames and names | `USER`, `NETBIOS` | `C:\Users\NAME`, `/home/NAME`, `/Users/NAME`, `DOMAIN\NAME` (skips well-known domains, file names and folders inside spaced paths). `DOMAIN\NAME$` is a machine account and becomes `HOST` | Reversible |
+| | | `USER` | Usernames in commands: `net user NAME`, `net localgroup … NAME /add`, `/user:`, `/u:`, `/ru`, `--user`, `-UserName`, and `-u`/`-U`/`-l` for tools where it means user (psexec, nxc, sqlcmd, mysql, psql, smbclient, hydra and similar), `curl -u NAME:`, `domain/NAME:…@host` | Reversible |
+| | | `USER`, `NETBIOS`, `ORG_DOMAIN` | Key/value fields in Windows events, JSON, CEF and key=value logs: account keys (`Account Name`, `*AccountName`, `*UserName`, `SAM Account Name`, `suser`, `duser`, `user`…) and domain keys (`Account Domain`, `*DomainName`…) | Reversible |
+| | | `USER` | Auth logs: `Accepted/Failed … for NAME`, `Invalid user NAME`, `session opened for user NAME`, `sudo: NAME :` | Reversible |
+| | | `PERSON` | Display-name fields (`Display Name`, `DisplayName`, `UserDisplayName`, `givenName`…), a name after a title (`Mr`, `Mrs`, `Dr`, `Prof`, `Engr`…), and a mail display name before a masked address (`"Jane Doe" <…>`) | Reversible |
+| 9 | Hostnames and cloud resource names | `HOST`, `ORG_DOMAIN` | Anything under a listed internal domain or a domain learned from email addresses; `\\host\share`; `DESKTOP-`, `LAPTOP-`, `WIN-`, `SRV-` names | Reversible |
+| | | `HOST` | Host fields (`*DeviceName`, `*ComputerName`, `*HostName`, `Workstation Name`, `Computer`, `devname`, `shost`, `dhost`, `host=`…), the host in a syslog line, and hostname-shaped words after `device`, `host`, `computer`, `server`, `workstation`. A dotted name in a destination-style field (`DestinationHostName`, `dhost`, `host=`) is often a public site, so it is masked only under a known domain or a private suffix (`.local`, `.lan`, `.internal`, `.corp`) | Reversible |
 | | | `AZ_STORAGE`, `AZ_SERVICEBUS`, `AZ_SQL`, `AZ_KEYVAULT`, `AZ_APP`, `AZ_REGISTRY`, `AZ_COSMOS`, `TENANT` | The resource name before a known Azure suffix, and `AccountName=` in connection strings | Reversible |
 | 10 | Custom terms (always on) | Your label, or `TERM` | Exact terms from the Custom terms box, longest first, whole-word | Reversible |
 | 11 | Domain SIDs | `DOMAIN_SID` | The domain part of `S-1-5-21-a-b-c`, keeping the RID | Reversible |
 | 12 | MAC addresses | `MAC` | `aa:bb:cc:dd:ee:ff` / `aa-bb-…` (skips all-zero and broadcast) | Reversible |
 | 13 | IP addresses | `PRIVATE_IP`, `PUBLIC_IP` | IPv4 (including defanged `[.]` and `(.)`) and IPv6; skips loopback, `0.0.0.0` and broadcast | Reversible |
+| 14 | Re-masking (always on) | The value's existing label | Any user, NETBIOS domain, person or host already in the session store, wherever it appears as a whole word (machine-account `$` and sentence punctuation kept outside). Follows the toggle of the original group | Reversible |
 
-**Skipped on purpose:** `NT AUTHORITY`, `BUILTIN`, `NT SERVICE` and other well-known domains; registry hives (`HKLM`, `HKCU`…); `SYSTEM`, `Administrator`, `Guest`, `krbtgt`, `Public`, `Default`; values such as `true`, `null`, `none`, `redacted`, `****`; variables and placeholders (`$pw`, `%PW%`, `*`, `<password>`, `{{pw}}`); anything in the never-mask list.
+**Skipped on purpose:** `NT AUTHORITY`, `BUILTIN`, `NT SERVICE` and other well-known domains; registry hives (`HKLM`, `HKCU`…); built-in and default accounts (`SYSTEM`, `Administrator`, `Guest`, `krbtgt`, `root`, `admin`, `sa`, `www-data`, `Public`, `Default`…); empty field values (`-`, `N/A`) and log levels (`INFO`, `ERROR`); values such as `true`, `null`, `none`, `redacted`, `****`; variables and placeholders (`$pw`, `%PW%`, `*`, `<password>`, `{{pw}}`); anything in the never-mask list.
 
-**Options that change detectors:** *Keep email domain* masks only the local part, as `USER`. *Keep public IPs* leaves public addresses as they are. Turning a group off skips it entirely.
+### Learned domains
+
+When emails are masked whole, the domain of each address is considered sensitive too. Before the detectors run, `learnDomains()` reduces each address's domain to its organisation domain (`mail.corp.example.co.uk` → `example.co.uk`) and adds it to `S.learned`. The hosts detector then treats learned domains like listed internal domains, so the same organisation is masked in `Received:` headers, URLs and FQDNs. Webmail and large shared platforms (`gmail.com`, `outlook.com`, `microsoft.com`, `onmicrosoft.com`…) are never learned. With *Keep email domain* on, nothing is learned. Learned domains last for the session and are forgotten by "Clear mapping".
+
+### Re-masking rules
+
+The last step looks up every whole word in a map of the session's users, NETBIOS domains, persons and hosts (one linear pass, so thousands of known values cost little). To avoid masking ordinary words:
+
+- Values shorter than 4 characters, all-digit values and common words (`backup`, `sales`, `admin`, `support`, `server`…) are never re-masked.
+- A short all-letter value (under 8 letters) is only re-masked with the same case, so the account `FINCO` doesn't swallow "Finco" in prose.
+- Multi-word names (`Jane Doe`) are matched as a phrase.
+
+**Options that change detectors:** *Keep email domain* masks only the local part, as `USER`, and turns off domain learning. *Keep public IPs* leaves public addresses as they are. Turning a group off skips it entirely, including re-masking of values that group found.
 
 ### Performance
 
-Every pattern is bounded so the work stays roughly linear in the input size. Long lines can't trigger runaway backtracking: email parts have length limits, the gap between a tool name and its password flag is capped at 500 characters, and the spaced-path check looks back at most 400 characters. The test suite times known worst-case inputs.
+Every pattern is bounded so the work stays roughly linear in the input size. Long lines can't trigger runaway backtracking: email parts have length limits, the gap between a tool name and its flag is capped at 500 characters, and the spaced-path check looks back at most 400 characters. Re-masking is a single pass with a map lookup per word. As a rough guide, 1.5 MB of mixed logs masks in about half a second. The test suite times known worst-case inputs.
 
 ## Privacy guarantees
 
@@ -133,6 +152,8 @@ Every pattern is bounded so the work stays roughly linear in the input size. Lon
 - **Options reduce masking.** "Keep email domain" and "Keep public IPs" deliberately leave those values in the clear.
 - **The hash is not a secret.** A 32-bit hash of a short one-way value could be brute-forced by someone who can read the tab's memory. It never leaves the page.
 - **The CSP doesn't cover everything.** It doesn't stop browser extensions from reading the page, other apps from reading the clipboard, or a user from following a link. The page contains no links for that reason.
+- **Cues can be wrong.** Field and keyword cues assume the value after `user=` is a user and the value after `Display Name:` is a person. An app name in a `DisplayName` field becomes a `PERSON` token, and an ordinary word that happens to equal a known username elsewhere is re-masked.
+- **Learned domains hide destinations.** If the text contains an address at a domain, every URL and host under that domain is masked too. Turn on *Keep email domain* when those destinations matter.
 - **Restore trusts token shapes.** Any `[LABEL_n]` in the reply that matches a stored token is replaced, even if the AI used it to mean something else.
 
 ## Tests

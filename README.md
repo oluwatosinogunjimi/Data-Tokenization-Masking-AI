@@ -30,17 +30,17 @@ Masked:  Account [NETBIOS_1]\[USER_1] logged on to [HOST_1] from [PRIVATE_IP_1]
 | Secrets | Private keys, JWTs, AWS/GitHub/Slack/Google keys, Bearer and Basic auth, `password=`-style values, passwords in command lines and URLs, Entra client secrets | No (one-way) |
 | Card numbers | Known card prefixes with a valid Luhn check, shown as `[CARD_1:****1111]` | No (one-way) |
 | National IDs | BVN and NIN after their keyword | No (one-way) |
-| People and accounts | Emails and UPNs, `DOMAIN\user`, profile paths, phone numbers, account numbers after a keyword | Yes |
-| Machines and networks | Hostnames under your internal domains, `DESKTOP-`-style names, UNC hosts, Azure resource names, IPv4/IPv6 (including defanged), MAC addresses | Yes |
+| People and accounts | Emails and UPNs, `DOMAIN\user`, profile paths, usernames in commands, account and display-name fields in logs (Windows events, JSON, key=value, syslog, mail headers), names after a title, phone numbers, account numbers after a keyword | Yes |
+| Machines and networks | Hostnames under your internal domains or the domains of masked emails, host fields in logs, `DESKTOP-`-style names, UNC hosts, machine accounts (`[HOST_1]$`), Azure resource names, IPv4/IPv6 (including defanged), MAC addresses | Yes |
 | Identifiers | GUIDs, domain SIDs (the RID is kept) | Yes |
 | Your own terms | Anything you list under **Custom terms**, with an optional label: `Acme Ltd \| ORG` | Yes |
 
-Well-known values are left alone: `NT AUTHORITY\SYSTEM`, `BUILTIN`, registry hives, `Administrator`, loopback addresses, file paths, version numbers, hashes and timestamps.
+Once a user, host or name has a token, it gets the same token wherever else it appears in the session. Well-known values are left alone: `NT AUTHORITY\SYSTEM`, `BUILTIN`, registry hives, built-in accounts such as `Administrator` and `root`, loopback addresses, file paths, version numbers, hashes and timestamps.
 
 ## Options
 
 - **Per-type toggles** turn each detector on or off.
-- **Keep email domain** masks only the name part of an email.
+- **Keep email domain** masks only the name part of an email, and leaves that domain visible elsewhere.
 - **Keep public IPs** leaves public addresses visible.
 - **Internal domains** turns any host under them into `HOST_n`.
 - **Never mask** lists exact values to leave alone.
@@ -79,7 +79,6 @@ tests/public-safety.js   real-data lint for the repo
 
 ## Roadmap
 
-- Mask user, host and name fields in key:value logs, and re-mask a value wherever it appears once it has a token
 - Restore tokens the AI reformats (lowercase, escaped, spaced)
 - A refreshed interface with highlighted tokens, hover to see a value, and click to copy
 - A review panel that flags likely misses before you copy

@@ -69,8 +69,8 @@ td.oneway{color:var(--muted);font-style:italic;font-family:system-ui,sans-serif}
         <label><input type="checkbox" data-g="phones" checked> Phone numbers</label>
         <label><input type="checkbox" data-g="emails" checked> Emails and UPNs</label>
         <label class="sub-opt"><input type="checkbox" id="keepEmailDomain"> Keep email domain (mask only the name)</label>
-        <label><input type="checkbox" data-g="users" checked> Usernames (profile paths, DOMAIN\user)</label>
-        <label><input type="checkbox" data-g="hosts" checked> Hostnames and cloud resource names (DESKTOP-, UNC, internal domains, Azure)</label>
+        <label><input type="checkbox" data-g="users" checked> Usernames and names (DOMAIN\user, profile paths, account and name fields, commands)</label>
+        <label><input type="checkbox" data-g="hosts" checked> Hostnames and cloud resource names (host fields, DESKTOP-, UNC, internal and email domains, Azure)</label>
         <label><input type="checkbox" data-g="guids" checked> GUIDs (tenant, object, device IDs)</label>
         <label><input type="checkbox" data-g="sids" checked> Domain SIDs (keeps the RID, e.g. -500)</label>
         <label><input type="checkbox" data-g="macs" checked> MAC addresses</label>
@@ -154,14 +154,18 @@ const DEFAULT_NEVER_MASK = [];
 // ========================================================================
 
 const $ = id => document.getElementById(id);
-const S = { fwd: new Map(), rev: new Map(), cnt: {}, rows: [] };
+const S = { fwd: new Map(), rev: new Map(), cnt: {}, rows: [], learned: new Set() };
 let PH = [], RUN = { counts: {} }, CFG = { on: {} }, ALLOW = new Set();
 
 const WELL_KNOWN_DOMAINS = new Set(['nt authority','authority','builtin','nt service','service','window manager',
   'font driver host','workgroup','hklm','hkcu','hkcr','hku','hkcc','hkey_local_machine','hkey_current_user',
   'hkey_classes_root','hkey_users','hkey_current_config']);
+// Built-in and default accounts stay visible: they carry signal, not identity.
 const SKIP_USERS = new Set(['public','default','default user','all users','shared','administrator','system',
-  'guest','krbtgt','localservice','networkservice']);
+  'guest','krbtgt','localservice','networkservice','local service','network service','anonymous logon','anonymous',
+  'root','admin','sa','nobody','daemon','www-data','oracle','postgres','mysql','ubuntu','ec2-user','azureuser']);
+// Words that appear where a field value would be, but aren't one (empty fields, the next key, prose).
+const NOT_A_NAME = /^(?:-|n\/a|na|null|none|unknown|account|domain|name|user|users|type|id|logon|security|subject|new|network|process|source|target|workstation|information|the|from|to|of|by|on|is|was|and|or|for|with|at)$/i;
 const BENIGN = /^(true|false|null|none|n\/a|yes|no|required|optional|redacted|\*+|x+)$/i;
 // Card prefixes (IIN): Visa, Mastercard incl. 2-series, Amex, Discover, JCB, UnionPay, Diners, Verve, Maestro.
 // Luhn alone also passes IMEIs and random IDs, so a number must match one of these to count as a card.
@@ -276,6 +280,103 @@ function azLabel(sfx){
 }
 const AZ_ACCOUNT = /(\bAccountName\s*=\s*)([a-z0-9]{3,24})(?=[;\s"']|$)/gi;
 const UNC_HOST = /(\\\\)([A-Za-z0-9][A-Za-z0-9-]{0,62}(?:\.[A-Za-z0-9-]+)*)(?=\\)/g;
+
+// ---- Emails, and the organisation domains learned from them ----
+const EMAIL_RE = /(?<![A-Za-z0-9._%+-])[A-Za-z0-9][A-Za-z0-9._%+-]{0,63}@(?:[A-Za-z0-9-]{1,63}\.){1,8}[A-Za-z]{2,24}\b/g;
+// Webmail and big-platform domains are shared by everyone, so masking them hides nothing and loses signal.
+const PUBLIC_MAIL = /^(?:gmail|googlemail|yahoo|ymail|rocketmail|outlook|hotmail|live|msn|icloud|me|mac|aol|proton|protonmail|pm|gmx|mail|zoho|yandex|tutanota|fastmail|hey|microsoft|google|amazon|apple|github|linkedin|facebook|onmicrosoft|sharepoint)\.[a-z.]+$/i;
+const SECOND_LEVEL = /^(?:co|com|org|net|gov|ac|edu|sch|ltd|plc|nic|mil)$/i;
+function orgDomain(d){
+  const p = d.toLowerCase().split('.');
+  const n = p.length >= 3 && p[p.length - 1].length === 2 && SECOND_LEVEL.test(p[p.length - 2]) ? 3 : 2;
+  return p.slice(-n).join('.');
+}
+// When emails are masked whole, their organisation domain is masked wherever else it appears
+// (Received: headers, URLs, FQDNs). With "keep email domain" on, the domain is meant to stay visible.
+function learnDomains(text){
+  if (CFG.keepEmailDomain || !CFG.on.emails || !CFG.on.hosts) return;
+  for (const m of text.matchAll(EMAIL_RE)){
+    const d = orgDomain(m[0].slice(m[0].lastIndexOf('@') + 1));
+    if (!PUBLIC_MAIL.test(d) && !ALLOW.has(d)) S.learned.add(d);
+  }
+}
+
+// ---- Accounts, hosts and names in structured logs (Windows events, JSON, key=value, syslog, mail headers) ----
+const ACCT = '[A-Za-z0-9](?:[A-Za-z0-9._$-]{0,62}[A-Za-z0-9_$])?';   // no trailing dot or hyphen (sentence punctuation)
+const HOSTNAME = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\$?';
+const KV_SEP = '["\']?[ \\t]*[:=][ \\t]*["\']?';
+const USER_KEYS = '[A-Za-z_]*(?:AccountName|UserName|LogonName)|Account Name|SAM Account Name|User Name|Logon Account|usrName|suser|duser|src_?user|dst_?user|user|usr|login';
+const HOST_KEYS = '[A-Za-z_]*(?:DeviceName|ComputerName|HostName|WorkstationName|MachineName)|Computer|Workstation Name|Source Workstation|Host Name|devname|dvchost|dvc_host|shost|dhost';
+const DOMAIN_KEYS = 'Account Domain|Target Domain|Subject Domain|Supplied Realm Name|[A-Za-z]*DomainName|AccountDomain|NetBIOS Domain';
+const NAME_KEYS = 'Display Name|[Dd]isplayName|UserDisplayName|AccountDisplayName|Full Name|FullName|givenName|surname|Manager';
+const USER_FIELD = new RegExp(`(\\b(?:${USER_KEYS})${KV_SEP})(${ACCT})(?![A-Za-z0-9._$@\\\\-]|\\.[A-Za-z0-9])`, 'gi');
+const HOST_FIELD = new RegExp(`(\\b(?:${HOST_KEYS})${KV_SEP}|\\bhost=["']?)(${HOSTNAME})(?![A-Za-z0-9._-])`, 'gi');
+const DOMAIN_FIELD = new RegExp(`(\\b(?:${DOMAIN_KEYS})${KV_SEP})([A-Za-z][A-Za-z0-9-]{0,62}(?:\\.[A-Za-z0-9-]+)*(?: AUTHORITY| SERVICE)?)(?![A-Za-z0-9.-])`, 'g');
+// A name is 1-4 capitalised words. The next key is not part of it: a run of Title Case words ending in ":"
+// (User Principal Name:) or a single word directly followed by ":" or "=" (AppDisplayName:).
+const NAME_WORD = `(?![A-Z][a-z]*(?:[ \\t]+[A-Z][a-z]+){0,2}[ \\t]*:)(?![\\w'’.-]+["']?[ \\t]*[:=])[A-Z][\\w'’.-]*`;
+const NAME_FIELD = new RegExp(`(\\b(?:${NAME_KEYS})${KV_SEP})(${NAME_WORD}(?:[ \\t]+${NAME_WORD}){0,3})`, 'g');
+const HONORIFIC = /\b((?:Mr|Mrs|Ms|Miss|Mx|Dr|Prof|Engr|Alhaji|Alhaja)\.?[ \t]+)([A-Z][a-z'’-]+(?:[ \t]+[A-Z][a-z'’-]+){0,2})/g;
+// "Display Name" <masked address>
+const MAIL_DISPLAY = /(?<![\w'’.-])(["']?)([A-Z][\w'’.-]*(?:[ \t]+[A-Z][\w'’.-]*){0,3})\1([ \t]*<)(?=\uE000)/g;
+const SYSLOG_HOST = /^((?:[A-Z][a-z]{2}[ \t]+\d{1,2}[ \t]+\d\d:\d\d:\d\d|\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?)[ \t]+)([A-Za-z0-9][A-Za-z0-9.-]{0,252})(?=[ \t]+[A-Za-z0-9_.\/-]+(?:\[\d+\])?:)/gm;
+const LOG_LEVEL = /^(?:info|warn|warning|error|err|debug|trace|fatal|notice|crit|critical|alert|emerg)$/i;
+const AUTH_USER = /(\b(?:Accepted|Failed)[ \t]+[\w-]+[ \t]+for[ \t]+(?:invalid[ \t]+user[ \t]+)?|\b[Ii]nvalid user[ \t]+|\bsession (?:opened|closed) for user[ \t]+|\bsudo:[ \t]+)([A-Za-z0-9._$-]{1,64}?)(?=[ \t]+(?:from|by)\b|[ \t]*\(|[ \t]+:)/g;
+// "on device ws-0081", "host SITE2-DC01": only hostname-shaped words (a letter plus a digit or hyphen).
+const DEVICE_CUE = new RegExp(`\\b((?:device|host|computer|machine|endpoint|server|workstation)[ \\t]+)(${HOSTNAME})(?![A-Za-z0-9._-])`, 'gi');
+// Usernames in command lines (passwords were already masked, so a password shows up as a placeholder).
+const NAME_END = '(?![A-Za-z0-9._$@\\\\:/-])';
+const CMD_USERS = [
+  new RegExp(`(\\bnet1?(?:\\.exe)?[ \\t]+user[ \\t]+)(${ACCT})(?=[ \\t]+(?:/|\\uE000)|[ \\t]*(?:["'\\r\\n;&|)]|$))`, 'gim'),
+  new RegExp(`(\\bnet1?(?:\\.exe)?[ \\t]+localgroup[ \\t]+(?:"[^"\\n]+"|\\S+)[ \\t]+)(${ACCT})(?=[ \\t]+/)`, 'gi'),
+  new RegExp(`((?:^|[ \\t])(?:/user:|/u:|/ru[ \\t]+|/u[ \\t]+|--user(?:name)?(?:[ \\t]+|=)|-UserName[ \\t]+|-User[ \\t]+)["']?)(${ACCT})${NAME_END}`, 'gim'),
+  new RegExp(`(\\b(?:psexec(?:64)?|paexec|nxc|netexec|crackmapexec|cme|evil-winrm|hydra|medusa|sqlcmd|bcp|osql|mysql(?:dump|admin)?|psql|smbclient|rpcclient|rdesktop|plink|pscp)(?:\\.exe|\\.py)?\\b[^\\n]{0,500}?[ \\t](?:-u|-U|-l|--username)[ \\t]+["']?)(${ACCT})(?![A-Za-z0-9._$@\\\\:/-]|%)`, 'gi'),
+  new RegExp(`(\\bsmbclient\\b[^\\n]{0,500}?[ \\t]-U[ \\t]+["']?)(${ACCT})(?=%)`, 'gi'),
+  new RegExp(`(\\b(?:curl|wget)(?:\\.exe)?\\b[^\\n]{0,500}?[ \\t](?:-u|--user|--http-user)(?:[ \\t]+|=)["']?)(${ACCT})(?=:)`, 'gi'),
+  new RegExp(`((?<![\\w./:-])[A-Za-z0-9.-]+/)(${ACCT})(?=:\\uE000)`, 'g'),
+];
+function userTok(u){
+  if (u.length < 2 || SKIP_USERS.has(u.toLowerCase()) || NOT_A_NAME.test(u) || /^\d+$/.test(u) || FILE_EXT.test(u)) return u;
+  if (u.endsWith('$')) return SKIP_USERS.has(u.slice(0, -1).toLowerCase()) ? u : mk('HOST', u.slice(0, -1)) + '$';   // machine account
+  return mk('USER', u);
+}
+function hostTok(h){
+  if (/^[\d.]+\$?$/.test(h) || /^localhost$/i.test(h) || NOT_A_NAME.test(h) || LOG_LEVEL.test(h)) return h;
+  return h.endsWith('$') ? mk('HOST', h.slice(0, -1)) + '$' : mk('HOST', h);
+}
+
+// ---- Re-masking: a user, host or name that already has a token gets it wherever else it appears ----
+const PROPAGATE = { USER: 'users', NETBIOS: 'users', PERSON: 'users', HOST: 'hosts' };
+// Never re-masked as bare words, even when they were a real value somewhere: too common in ordinary text.
+const PROP_STOP = new Set(['admin','user','users','test','guest','root','sales','support','info','service','services','backup',
+  'system','server','default','public','domain','local','corp','home','office','mail','team','group','staff','data','file','files',
+  'share','print','null','none','true','false','unknown','network','internet','cloud','web','www','app','apps','api','dev','prod',
+  'live','main','master','temp','tmp','work','windows','linux','client','host','hosts','device','computer']);
+function propagate(t){
+  const single = new Map(), multi = [];
+  for (const [tok, orig] of S.rev){
+    const label = tok.slice(1, tok.lastIndexOf('_'));
+    const g = PROPAGATE[label];
+    const low = orig.toLowerCase();
+    if (!g || !CFG.on[g] || orig.length < 4 || /^\d+$/.test(orig) || PROP_STOP.has(low) || ALLOW.has(low)) continue;
+    if (/\s/.test(orig)) multi.push([orig, label]); else if (!single.has(low)) single.set(low, [orig, label]);
+  }
+  if (multi.length){
+    const byKey = new Map(multi.map(([o, l]) => [o.toLowerCase().replace(/\s+/g, ' '), [o, l]]));
+    const re = new RegExp('(?<![A-Za-z0-9])(' + [...byKey.keys()].slice(0, 500).map(k => esc(k).replace(/ /g, '[ \\t]+')).join('|') + ')(?![A-Za-z0-9])', 'gi');
+    t = t.replace(re, m => { const e = byKey.get(m.toLowerCase().replace(/\s+/g, ' ')); return e ? mk(e[1], e[0]) : m; });
+  }
+  if (!single.size) return t;
+  return t.replace(/(?<![A-Za-z0-9._$@-])[A-Za-z0-9][A-Za-z0-9._$-]*/g, w => {
+    let core = w.replace(/[.-]+$/, ''); const tail = w.slice(core.length);
+    let e = single.get(core.toLowerCase()), dollar = '';
+    if (!e && core.endsWith('$')){ core = core.slice(0, -1); dollar = '$'; e = single.get(core.toLowerCase()); }
+    if (!e) return w;
+    // Short all-letter values only match with the same case, so "Sales" in prose isn't taken for the account "SALES".
+    if (/^[A-Za-z]+$/.test(e[0]) && e[0].length < 8 && core !== e[0]) return w;
+    return mk(e[1], e[0]) + dollar + tail;
+  });
+}
 const IPV4_RE = /(?<!\d)(?<!\d\.)(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.|\[\.\]|\(\.\))){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?!\d)(?!\.\d)/g;
 const IPV6_RE = /(?<![0-9A-Fa-f:.])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})?|::[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})(?![0-9A-Fa-f:])/g;
 
@@ -322,7 +423,7 @@ const DETECTORS = [
       return mk('CARD', d, { oneWay: true, suffix: ':****' + d.slice(-4) });
     }) },
   // Bounded repeats keep this linear: the old open-ended pattern could freeze for ~40 s on long dotted runs.
-  { g: 'emails', run: t => t.replace(/(?<![A-Za-z0-9._%+-])[A-Za-z0-9][A-Za-z0-9._%+-]{0,63}@(?:[A-Za-z0-9-]{1,63}\.){1,8}[A-Za-z]{2,24}\b/g, m => {
+  { g: 'emails', run: t => t.replace(EMAIL_RE, m => {
       if (CFG.keepEmailDomain){ const i = m.lastIndexOf('@'); return mk('USER', m.slice(0, i)) + m.slice(i); }
       return mk('EMAIL', m);
     }) },
@@ -331,18 +432,34 @@ const DETECTORS = [
       (m, p, u) => SKIP_USERS.has(u.toLowerCase()) ? m : p + mk('USER', u))
     .replace(/(^|[\s"'=(])(\/(?:home|Users)\/)([^\/\s"'<>|:\uE000-\uE0FF]+)/gm,
       (m, pre, p, u) => SKIP_USERS.has(u.toLowerCase()) ? m : pre + p + mk('USER', u))
-    .replace(/(^|[\s"'=(,;\[:])([A-Za-z][A-Za-z0-9-]{0,14})\\([A-Za-z0-9._$-]{1,64})(?![\\\w$-])/gm, (m, pre, dom, u, off, all) => {
+    .replace(/(^|[\s"'=(,;\[:])([A-Za-z][A-Za-z0-9-]{0,14})\\([A-Za-z0-9._$-]{0,63}[A-Za-z0-9_$])(?![\\\w$-])/gm, (m, pre, dom, u, off, all) => {
       if (WELL_KNOWN_DOMAINS.has(dom.toLowerCase())) return m;
       // A file name (Temp\x.ps1, Office16\WINWORD.EXE) or a folder inside a spaced path is not DOMAIN\user.
       if (FILE_EXT.test(u) && !u.endsWith('$') || insideSpacedPath(all, off, pre)) return m;
-      return pre + mk('NETBIOS', dom) + '\\' + (SKIP_USERS.has(u.toLowerCase()) ? u : mk('USER', u));
+      return pre + mk('NETBIOS', dom) + '\\' + userTok(u);
     })
+    .replace(/[\s\S]*/, t2 => CMD_USERS.reduce((acc, re) => acc.replace(re, (m, pre, u) => pre + userTok(u)), t2))
+    // AccountName=... followed by ";" is an Azure connection string; the hosts group handles that one.
+    .replace(USER_FIELD, (m, k, u, off, all) => /accountname/i.test(k) && all[off + m.length] === ';' ? m : k + userTok(u))
+    .replace(DOMAIN_FIELD, (m, k, d) => WELL_KNOWN_DOMAINS.has(d.toLowerCase()) || NOT_A_NAME.test(d) ? m : k + mk(d.includes('.') ? 'ORG_DOMAIN' : 'NETBIOS', d))
+    .replace(AUTH_USER, (m, k, u) => k + userTok(u))
+    .replace(NAME_FIELD, (m, k, n) => k + mk('PERSON', n))
+    .replace(HONORIFIC, (m, h, n) => h + mk('PERSON', n))
+    .replace(MAIL_DISPLAY, (m, q, n, lt) => NOT_A_NAME.test(n) ? m : q + mk('PERSON', n) + q + lt)
   },
   { g: 'hosts', run: t => {
-      for (const s of CFG.domains){
+      const doms = [...new Set([...CFG.domains, ...S.learned])].sort((a, b) => b.length - a.length);
+      for (const s of doms){
         const re = new RegExp('(?<![A-Za-z0-9.-])((?:[A-Za-z0-9-]+\\.)*)(' + esc(s) + ')(?![A-Za-z0-9-]|\\.[A-Za-z0-9])', 'gi');
         t = t.replace(re, (m, sub) => sub ? mk('HOST', m) : mk('ORG_DOMAIN', m));
       }
+      t = t.replace(HOST_FIELD, (m, k, h) => {
+        // A dotted name in a destination-style field is often a public site: mask it only if it looks internal.
+        if (h.includes('.') && /dest|dhost|^host=|hostname/i.test(k) && !/\.(?:local|lan|internal|intranet|corp|home\.arpa)\$?$/i.test(h)) return m;
+        return k + hostTok(h);
+      });
+      t = t.replace(SYSLOG_HOST, (m, p, h) => p + hostTok(h));
+      t = t.replace(DEVICE_CUE, (m, cue, h) => /[A-Za-z]/.test(h) && /[\d-]/.test(h) && !FILE_EXT.test(h) ? cue + hostTok(h) : m);
       // \\host\share — IP hosts are left for the IP detector so they keep their PRIVATE/PUBLIC label.
       t = t.replace(UNC_HOST, (m, p, h) => /^[\d.]+$/.test(h) || /^localhost$/i.test(h) ? m : p + mk('HOST', h));
       t = t.replace(AZ_RES, (m, name, sfx) => {
@@ -379,7 +496,9 @@ const DETECTORS = [
         if (!priv && CFG.keepPublicIp) return m;
         return mk(priv ? 'PRIVATE_IP' : 'PUBLIC_IP', m, { norm: lm });
       });
-    } }
+    } },
+  // Last: re-mask users, hosts and names found anywhere in this session wherever else they appear.
+  { g: 'propagate', always: true, run: propagate }
 ];
 
 function readCfg(){
@@ -404,6 +523,7 @@ function readCfg(){
 
 function maskText(text){
   PH = []; RUN = { counts: {} };
+  learnDomains(text);
   let t = text;
   for (const d of DETECTORS) if (d.always || CFG.on[d.g]) t = d.run(t);
   return t.replace(/\uE000([\uE010-\uE019]+)\uE001/g, (m, s) => PH[dec(s)]);
@@ -475,7 +595,7 @@ $('restoreBtn').addEventListener('click', () => { $('restored').value = restoreT
 $('copyRestoredBtn').addEventListener('click', e => copyFrom($('restored'), e.currentTarget));
 $('clearMapBtn').addEventListener('click', () => {
   if (!confirm('Clear all tokens? Text you already masked can no longer be restored.')) return;
-  S.fwd.clear(); S.rev.clear(); S.cnt = {}; S.rows = [];
+  S.fwd.clear(); S.rev.clear(); S.cnt = {}; S.rows = []; S.learned.clear();
   ['output', 'restored'].forEach(id => { $(id).value = ''; });
   $('stats').textContent = ''; renderMap();
 });

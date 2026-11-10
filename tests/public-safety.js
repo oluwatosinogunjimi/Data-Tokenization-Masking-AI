@@ -17,7 +17,7 @@ const SAFE_GUIDS = new Set([
   '9c1e8a7b-1d2e-4f3a-8b9c-0d1e2f3a4b5c',
   '00000000-0000-0000-0000-000000000000',
 ]);
-const SAFE_EMAIL_DOMAIN = /(^|\.)(example\.(com|org|net|co\.uk|local)|contoso\.com|fabrikam\.com|example|test|invalid|localhost|example\.onmicrosoft\.com|contoso\.onmicrosoft\.com)$/i;
+const SAFE_EMAIL_DOMAIN = /(^|\.)(example\.(com|org|net|co\.uk|local)|contoso\.com|fabrikam\.com|example|test|invalid|localhost|example\.onmicrosoft\.com|contoso\.onmicrosoft\.com|gmail\.com)$/i;
 const SAFE_IPV4 = new Set(['1.2.3.4', '0.0.0.0', '255.255.255.255']);
 
 function isSafeIpv4(ip){
