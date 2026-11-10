@@ -6,14 +6,14 @@ Paste Masker is one HTML file with inline CSS and JavaScript. It has no build st
 
 | Component | Where | Responsibility |
 |---|---|---|
-| Page shell | `<head>`, `<main>` | Layout, the Content Security Policy, the settings panel and the four text areas (raw, masked, AI reply, restored). |
+| Page shell | `<head>`, `<main>` | Layout, the Content Security Policy, the settings panel and the four text areas (raw, masked, AI reply, restored). Every text area carries the privacy attributes described under [Text fields](#text-fields). |
 | Defaults | `DEFAULT_TERMS`, `DEFAULT_INTERNAL_DOMAINS`, `DEFAULT_NEVER_MASK` at the top of the script | Values loaded into the settings boxes when the page opens. Edit them in your own copy of the file. |
 | Config reader | `readCfg()` | Reads the toggles and text boxes into `CFG` (enabled groups, options, custom terms, internal domains) and `ALLOW` (never-mask list) on every Mask. |
 | Detectors | `DETECTORS` array | Ordered list of pattern groups. Each replaces what it finds with a placeholder via `mk()`. |
 | Tokeniser | `mk(label, value, options)` | Looks up or creates the token for a value, records it in the session store, and returns a placeholder. |
 | Placeholder layer | `place()`, `enc()`, `dec()` | Holds finished tokens out of the text while the remaining detectors run (see below). |
 | Session store | `S` | The token map for the current tab: forward map, reverse map, per-label counters and display rows. |
-| Restorer | `restoreText()` | Swaps tokens in the AI reply back to their original values using the reverse map. |
+| Restorer | `restoreText()`, `renderRestoreStats()` | Swaps tokens in the AI reply back to their original values using the reverse map, tolerating reformatted tokens, and reports what it couldn't restore. |
 | Renderers | `renderStats()`, `renderMap()` | The "Masked: …" summary and the mapping table. Values are written with `textContent`, never as HTML. |
 | Clipboard | `copyFrom()` | Copies output with the Clipboard API, falling back to a selection copy. |
 
@@ -38,7 +38,7 @@ flowchart LR
 
 1. **Mask.** `readCfg()` captures the settings. `maskText()` resets the placeholder list and per-run counts, learns organisation domains from the email addresses in the text, then runs each enabled detector over the text in order. Every match goes through `mk()`, which returns a placeholder. When all detectors are done, the placeholders are expanded into their visible tokens.
 2. **Copy.** The masked text is copied and pasted into an AI chat by the user. The page itself sends nothing anywhere.
-3. **Restore.** The AI reply is pasted back. `restoreText()` replaces every token it knows with the original value. Tokens it doesn't know, and one-way tokens, are left as they are.
+3. **Restore.** The AI reply is pasted back (Restore, or Ctrl+Enter in the reply box). `restoreText()` replaces every token it knows with the original value, including tokens the AI reformatted. One-way tokens stay tokens, unknown ones are left as they are, and a line under the button reports both.
 4. **Clear.** "Clear mapping" (or closing the tab) empties the session store. After that, earlier masked text can no longer be restored.
 
 ## Tokens
@@ -55,6 +55,32 @@ A token is `[LABEL_n]`: an upper-case label and a counter that is separate per l
 |---|---|---|---|
 | Reversible | Original value in the reverse map | Yes | Identifiers you want back in the reply: users, names, emails, hosts, IPs, GUIDs, phones, account numbers, custom terms. |
 | One-way | A 32-bit FNV-1a hash of the normalised value, used only to keep the token consistent | No | Secrets and high-risk numbers: keys, tokens, passwords, card numbers, BVN, NIN. The mapping table shows "not stored (one-way)". |
+
+## Restore
+
+AI replies often reformat tokens. Restore accepts, for any label used in this session:
+
+| Form in the reply | Example | Restored |
+|---|---|---|
+| As written, in backticks or bold | `[HOST_1]`, `` `[HOST_1]` ``, `**[HOST_1]**` | Yes |
+| Bare | `HOST_1` | Yes |
+| Any case, in brackets | `[host_1]`, `[Host_1]` | Yes |
+| Markdown-escaped | `\[HOST\_1\]`, `[HOST\_1]`, `HOST\_1` | Yes |
+| Space, hyphen, non-breaking space or padding | `[HOST 1]`, `[HOST-1]`, `[ HOST_1 ]`, `[private ip 1]` | Yes |
+| One bracket missing | `[HOST_1 was down`, `HOST_1]` | Yes |
+| Plural or possessive | `HOST_1s`, `HOST_1's` | Yes (the `s` stays) |
+| Invisible characters inside | zero-width space or joiner between label and number | Yes |
+| Bare lowercase | `host_1` | No: more likely a code identifier |
+| Prose | `host 1`, `user 1 of 3` | No: bare forms need the underscore |
+| A different number | `HOST_10` when only `HOST_1` exists | No, reported as not restored |
+
+How it works: one pass matches bracketed forms case-insensitively, a second matches bare upper-case forms. Each resolved piece is held in a private-use placeholder (`U+E002 … U+E003`) until both passes finish, so the second pass can't re-match a token the first pass wrote back, or text inside a restored value. A `\` before `[` only counts as a markdown escape when the `]` is escaped too, so `C:\Users\[USER_1]\AppData` restores to the real path.
+
+The report under the Restore button lists:
+
+- **Restored**: how many values came back.
+- **Not restored, not from this session**: token-shaped text the session doesn't know, such as a number the AI invented, a token from another tab, or anything left after "Clear mapping".
+- **One-way, kept as tokens**: secrets, cards and national IDs, written back in their canonical form (`[SECRET_1]`, `[CARD_1:****1111]`).
 
 ## Session store
 
@@ -140,10 +166,25 @@ Every pattern is bounded so the work stays roughly linear in the input size. Lon
 
 ## Privacy guarantees
 
-- **No network.** The CSP meta tag is `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:`, so the page cannot fetch, post, open sockets or load remote resources.
+- **No network.** The CSP meta tag is `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'`, so the page cannot fetch, post, open sockets or load remote resources.
 - **No persistence of values.** The session store lives in memory only. Closing or reloading the tab, or "Clear mapping", discards it.
 - **One-way stays one-way.** Secrets are never stored. Only a short hash is kept, to keep their token consistent, and restore can never bring them back.
 - **No HTML injection.** Pasted text and stored values are only ever placed with `textContent` or into text areas.
+- **Hardened text fields.** See below.
+
+### Text fields
+
+Every text area asks the browser and common extensions not to keep or send its contents:
+
+| Attribute | Stops |
+|---|---|
+| `autocomplete="off"` | Form history, and restoring the text after a reload, a crash or a discarded tab (the browser doesn't save these fields in session history) |
+| `spellcheck="false"`, `autocorrect="off"`, `autocapitalize="off"` | Spell-check (including cloud-enhanced spell-check) and mobile keyboard corrections |
+| `translate="no"` (also on `<html>`), `<meta name="google" content="notranslate">` | Offers to translate the page, which sends its text to a translation service |
+| `writingsuggestions="false"` | Built-in writing suggestions |
+| `data-gramm`, `data-gramm_editor`, `data-enable-grammarly`, `data-lt-active`, `data-ms-editor` (all `"false"`) | Grammarly, LanguageTool and Microsoft Editor, which send text to their servers |
+
+As a backstop, the four working boxes (raw, masked, reply, restored) are cleared on `pagehide`, when the tab closes or navigates away. The mapping itself is never written anywhere. The CSP also sets `form-action 'none'` and `base-uri 'none'`, which `default-src` doesn't cover, and the page has no forms or links. The test suite fails if any text field lacks one of these attributes.
 
 ## Limits
 
@@ -152,9 +193,10 @@ Every pattern is bounded so the work stays roughly linear in the input size. Lon
 - **Options reduce masking.** "Keep email domain" and "Keep public IPs" deliberately leave those values in the clear.
 - **The hash is not a secret.** A 32-bit hash of a short one-way value could be brute-forced by someone who can read the tab's memory. It never leaves the page.
 - **The CSP doesn't cover everything.** It doesn't stop browser extensions from reading the page, other apps from reading the clipboard, or a user from following a link. The page contains no links for that reason.
+- **Opt-outs are requests.** The field attributes are honoured by browsers and the named extensions, but an extension can ignore them. Use a browser profile without such extensions for sensitive text.
 - **Cues can be wrong.** Field and keyword cues assume the value after `user=` is a user and the value after `Display Name:` is a person. An app name in a `DisplayName` field becomes a `PERSON` token, and an ordinary word that happens to equal a known username elsewhere is re-masked.
 - **Learned domains hide destinations.** If the text contains an address at a domain, every URL and host under that domain is masked too. Turn on *Keep email domain* when those destinations matter.
-- **Restore trusts token shapes.** Any `[LABEL_n]` in the reply that matches a stored token is replaced, even if the AI used it to mean something else.
+- **Restore trusts token shapes.** Any token form in the reply that matches a stored token is replaced, even if the AI used it to mean something else.
 
 ## Tests
 

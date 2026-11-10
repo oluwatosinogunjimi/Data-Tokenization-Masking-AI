@@ -17,6 +17,7 @@ Useful reports include:
 - The page makes no network requests. A Content Security Policy blocks them.
 - Real values are held in memory for the current tab only and are never written to storage.
 - One-way values (secrets, card numbers, national IDs) are never stored and can't be restored.
+- Text fields opt out of form history, session restore, spell-check, translation and common grammar extensions.
 
 ## What it doesn't
 

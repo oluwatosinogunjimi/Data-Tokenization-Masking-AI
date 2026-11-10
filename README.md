@@ -11,7 +11,7 @@ Nothing leaves your machine. The page blocks all network access and saves nothin
 1. Download `paste-masker.html` and open it in a browser. There is nothing to install.
 2. Paste your text into **Raw text** and press **Mask** (or Ctrl+Enter).
 3. Read the masked output, then copy it into your AI chat.
-4. Paste the AI's reply into **AI reply** and press **Restore**.
+4. Paste the AI's reply into **AI reply** and press **Restore** (or Ctrl+Enter). Restore copes with tokens the AI reformats, such as `[host_1]`, `\[HOST\_1\]` or `[HOST 1]`, and lists any tokens it couldn't restore.
 
 Press **Load sample** to see it work on fictional data.
 
@@ -51,6 +51,7 @@ Once a user, host or name has a token, it gets the same token wherever else it a
 - A Content Security Policy blocks every network request from the page.
 - The token map is kept in memory for the current tab only. **Clear mapping**, a reload or closing the tab discards it.
 - One-way values are never stored, so they can't be restored or recovered.
+- Text boxes ask the browser not to save, spell-check, translate or autocorrect their contents, and opt out of grammar extensions that upload text. They are cleared when the tab closes.
 
 Masking is pattern-based, so it **will** miss things: names in free text, unusual password formats, identifiers it has no pattern for. Always read the masked output before you paste it, and add anything it missed to Custom terms. Masking reduces risk; it doesn't replace the data-handling rules that apply to you.
 
@@ -79,7 +80,6 @@ tests/public-safety.js   real-data lint for the repo
 
 ## Roadmap
 
-- Restore tokens the AI reformats (lowercase, escaped, spaced)
 - A refreshed interface with highlighted tokens, hover to see a value, and click to copy
 - A review panel that flags likely misses before you copy
 - More detectors: UK landlines, masked card numbers, more ID formats

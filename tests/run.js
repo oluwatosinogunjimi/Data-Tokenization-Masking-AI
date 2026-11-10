@@ -2,6 +2,8 @@
 // Runs every check against paste-masker.html. No dependencies: `node tests/run.js` (add -v to print outputs).
 // Exit code 1 on any failure, including a known gap (todo) that now passes and should lose its todo.
 'use strict';
+const fs = require('fs');
+const path = require('path');
 const { loadPage } = require('./page.js');
 const cases = require('./cases.js');
 
@@ -32,27 +34,36 @@ for (const c of cases){
 // ---- 2. Restore ----
 {
   const p = loadPage({ domains: ['example.local'] });
-  const masked = p.mask('user jdoe@example.com on fs01.example.local from 10.0.0.5 with password=Hunter2!x');
-  const t = name => (masked.match(new RegExp('\\[' + name + '_\\d+\\]')) || [])[0];
-  const email = t('EMAIL'), host = t('HOST'), ip = t('PRIVATE_IP'), secret = t('SECRET');
+  const masked = p.mask('C:\\Users\\jdoe\\x on fs01.example.local from 10.0.0.5 password=Hunter2!x card 4111 1111 1111 1111');
+  const t = name => (masked.match(new RegExp('\\[' + name + '_\\d+(?::[^\\]]*)?\\]')) || [])[0];
+  const user = t('USER'), host = t('HOST'), ip = t('PRIVATE_IP'), secret = t('SECRET'), card = t('CARD');
+  const H = 'fs01.example.local', IP = '10.0.0.5';
+  const hn = host.slice(1, -1), ipn = ip.slice(1, -1);   // HOST_1, PRIVATE_IP_1
   const checks = [
-    { name: 'restore: bracketed tokens', reply: `${email} logged on to ${host} from ${ip}.`, want: ['jdoe@example.com', 'fs01.example.local', '10.0.0.5'] },
-    { name: 'restore: bare tokens', reply: `${email.slice(1, -1)} used ${host.slice(1, -1)}`, want: ['jdoe@example.com', 'fs01.example.local'] },
-    { name: 'restore: inside backticks and bold', reply: `\`${host}\` and **${ip}**`, want: ['`fs01.example.local`', '**10.0.0.5**'] },
-    { name: 'restore: one-way token stays a token', reply: `The secret ${secret} was exposed.`, want: [secret], not: ['Hunter2!x'] },
-    { name: 'restore: unknown token left alone', reply: 'See [USER_999] and [HOST_42].', want: ['[USER_999]', '[HOST_42]'] },
-    // Known gaps (planned: tolerant restore)
-    { name: 'restore: lowercase token', reply: host.toLowerCase(), want: ['fs01.example.local'], todo: 'planned: tolerant restore' },
-    { name: 'restore: markdown-escaped token', reply: host.replace('[', '\\[').replace('_', '\\_').replace(']', '\\]'), want: ['fs01.example.local'], todo: 'planned: tolerant restore' },
-    { name: 'restore: space instead of underscore', reply: host.replace('_', ' '), want: ['fs01.example.local'], todo: 'planned: tolerant restore' },
+    { name: 'bracketed tokens', reply: `${host} from ${ip}.`, want: [H, IP], stats: 'Restored 2 values.' },
+    { name: 'bare tokens', reply: `${hn} from ${ipn}`, want: [H, IP] },
+    { name: 'inside backticks and bold', reply: `\`${host}\` and **${ip}**`, want: ['`' + H + '`', '**' + IP + '**'] },
+    { name: 'lowercase and title case', reply: `[${hn.toLowerCase()}] and [${hn[0] + hn.slice(1).toLowerCase()}]`, want: [`${H} and ${H}`] },
+    { name: 'markdown-escaped', reply: `\\[${hn.replace('_', '\\_')}\\] and [${ipn.replace(/_/g, '\\_')}]`, want: [`${H} and ${IP}`] },
+    { name: 'space, hyphen or padding instead of underscore', reply: `[${hn.replace('_', ' ')}] [${hn.replace('_', '-')}] [ ${hn} ] [private ip ${ipn.split('_').pop()}]`, want: [`${H} ${H} ${H} ${IP}`] },
+    { name: 'one bracket missing', reply: `[${hn} was down; ${hn}] too`, want: [`${H} was down; ${H} too`] },
+    { name: 'plurals', reply: `${hn}s and ${hn}'s disk`, want: [`${H}s and ${H}'s disk`] },
+    { name: 'invisible characters inside', reply: `[${hn.replace('_', '\u200B_')}] and [${hn.replace('_', '\u00a0')}]`, want: [`${H} and ${H}`] },
+    { name: 'token inside a Windows path', reply: `C:\\Users\\${user}\\AppData`, want: ['C:\\Users\\jdoe\\AppData'] },
+    { name: 'prose and code left alone', reply: `user 1 of 3, host 1, ${hn.toLowerCase()} = 5, ${hn}0`, want: [`user 1 of 3, host 1, ${hn.toLowerCase()} = 5, ${hn}0`] },
+    { name: 'one-way tokens stay tokens', reply: `[${secret.slice(1, -1).toLowerCase()}] and ${card} and \\[${card.slice(1, -1).replace('_', '\\_').replace(/\*/g, '\\*')}\\]`, want: [`${secret} and ${card} and ${card}`], not: ['Hunter2!x', '4111'], stats: 'One-way, kept as tokens' },
+    { name: 'unknown tokens reported', reply: 'See [USER_999] and [FOO_1].', want: ['[USER_999]', '[FOO_1]'], stats: 'Not restored, not from this session: [USER_999], [FOO_1].' },
   ];
   for (const c of checks){
     const out = p.restore(c.reply);
+    const stats = p.restoreStats();
     const problems = [...c.want.filter(v => !out.includes(v)).map(v => `missing: ${v}`), ...(c.not || []).filter(v => out.includes(v)).map(v => `must not appear: ${v}`)];
-    if (c.todo){ if (problems.length) gaps.push(`${c.name} (${c.todo})`); else fail(c.name, `marked todo but now passes: remove the todo`, out); }
-    else if (problems.length) fail(c.name, problems.join('; '), out);
-    else ok(c.name, out);
+    if (c.stats && !stats.includes(c.stats)) problems.push(`report should include "${c.stats}", got "${stats}"`);
+    problems.length ? fail('restore: ' + c.name, problems.join('; '), out) : ok('restore: ' + c.name, out);
   }
+  p.clear();
+  const out = p.restore(host);
+  out === host && /mapping is empty/.test(p.restoreStats()) ? ok('restore: after Clear mapping') : fail('restore: after Clear mapping', `got "${out}" / "${p.restoreStats()}"`);
 }
 
 // ---- 3. Session: a second paste reuses tokens and learned domains ----
@@ -83,7 +94,29 @@ for (const c of cases){
   else ok('sample round trip');
 }
 
-// ---- 5. Performance (worst-case inputs that once froze the page) ----
+// ---- 5. Field and page hardening ----
+{
+  const html = fs.readFileSync(path.join(__dirname, '..', 'paste-masker.html'), 'utf8');
+  const REQUIRED = ['autocomplete="off"', 'autocorrect="off"', 'autocapitalize="off"', 'spellcheck="false"', 'translate="no"',
+    'writingsuggestions="false"', 'data-gramm="false"', 'data-gramm_editor="false"', 'data-enable-grammarly="false"', 'data-lt-active="false"', 'data-ms-editor="false"'];
+  const fields = html.match(/<(?:textarea|input)\b[^>]*>/g) || [];
+  const textFields = fields.filter(f => /^<textarea/.test(f) || /type="(?:text|search|password)"/.test(f) || !/type=/.test(f));
+  const missing = textFields.flatMap(f => REQUIRED.filter(a => !f.includes(a)).map(a => `${(f.match(/id="([^"]+)"/) || [])[1]} lacks ${a}`));
+  missing.length || !textFields.length ? fail('every text field is hardened', missing.join('; ') || 'no text fields found') : ok('every text field is hardened', `${textFields.length} fields`);
+  const csp = (html.match(/Content-Security-Policy" content="([^"]+)"/) || [])[1] || '';
+  const needs = ["default-src 'none'", "form-action 'none'", "base-uri 'none'"].filter(d => !csp.includes(d));
+  needs.length ? fail('CSP', `missing ${needs.join(', ')}`) : ok('CSP', csp);
+  const banned = html.match(/localStorage|sessionStorage|indexedDB|document\.cookie|innerHTML|outerHTML|insertAdjacentHTML|fetch\(|XMLHttpRequest|WebSocket|sendBeacon|<a\s|href=|<form/g);
+  banned ? fail('no storage, network, HTML injection or links in the page', [...new Set(banned)].join(', ')) : ok('no storage, network, HTML injection or links in the page');
+  const p = loadPage();
+  const masked = p.mask('Account Name: jdoe on 10.0.0.5');
+  p.restore(masked); p.pagehide();
+  const left = ['input', 'output', 'reply', 'restored'].filter(id => p.field(id));
+  const stillRestores = p.restore(masked).includes('jdoe');
+  left.length || !stillRestores ? fail('pagehide clears the text but keeps the session', `not cleared: ${left.join(', ')}; restore after: ${stillRestores}`) : ok('pagehide clears the text but keeps the session');
+}
+
+// ---- 6. Performance (worst-case inputs that once froze the page) ----
 {
   const p = loadPage();
   const LIMIT_MS = 2000;

@@ -19,8 +19,10 @@ function loadPage(opts = {}){
   });
   const off = new Set(opts.off || []);
   const boxes = GROUPS.map(g => ({ dataset: { g }, checked: !off.has(g) }));
+  const winHandlers = {};
   const ctx = {
     console, setTimeout, navigator: {}, confirm: () => true,
+    addEventListener(type, fn){ winHandlers[type] = fn; },
     document: {
       getElementById: el,
       querySelectorAll: () => boxes,
@@ -43,6 +45,9 @@ function loadPage(opts = {}){
     clear(){ el('clearMapBtn').handlers.click(); },
     sample(){ el('sampleBtn').handlers.click(); return { input: el('input').value, output: el('output').value }; },
     stats(){ return el('stats').textContent; },
+    restoreStats(){ return el('restoreStats').textContent; },
+    pagehide(){ winHandlers.pagehide && winHandlers.pagehide(); },
+    field(id){ return el(id).value; },
   };
 }
 

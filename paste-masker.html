@@ -1,10 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no">
 <head>
 <meta charset="utf-8">
 <!-- Blocks all network access from this page: nothing you paste can leave your PC through it. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none';">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Keep browsers from offering to translate the page, which would send its text to a translation service. -->
+<meta name="google" content="notranslate">
 <title>Paste Masker</title>
 <style>
 :root{
@@ -36,6 +38,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:var(--a
 button:hover{filter:brightness(1.05)}
 .stats{color:var(--muted);font-size:13px}
 .stats.ok{color:var(--ok)}
+.stats.warn{color:var(--warn)}
 details summary{cursor:pointer;font-weight:600}
 .opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 16px;margin:12px 0}
 .opts label{display:flex;gap:8px;align-items:flex-start}
@@ -81,17 +84,17 @@ td.oneway{color:var(--muted);font-style:italic;font-family:system-ui,sans-serif}
         <div>
           <h2>Custom terms</h2>
           <p class="hint">One per line. Optional label: <code>Acme Ltd | ORG</code></p>
-          <textarea id="terms" class="small" spellcheck="false" placeholder="Acme Ltd | ORG&#10;NAS-01 | HOST&#10;Jane Doe | PERSON"></textarea>
+          <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="terms" class="small" placeholder="Acme Ltd | ORG&#10;NAS-01 | HOST&#10;Jane Doe | PERSON"></textarea>
         </div>
         <div>
           <h2>Internal domains</h2>
           <p class="hint">Any host under these becomes HOST_n.</p>
-          <textarea id="domains" class="small" spellcheck="false" placeholder="corp.acme.com&#10;acme.local"></textarea>
+          <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="domains" class="small" placeholder="corp.acme.com&#10;acme.local"></textarea>
         </div>
         <div>
           <h2>Never mask</h2>
           <p class="hint">Exact values to leave as they are.</p>
-          <textarea id="allow" class="small" spellcheck="false"></textarea>
+          <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="allow" class="small"></textarea>
         </div>
       </div>
     </details>
@@ -100,7 +103,7 @@ td.oneway{color:var(--muted);font-style:italic;font-family:system-ui,sans-serif}
   <div class="grid">
     <div class="card">
       <h2>Raw text</h2>
-      <textarea id="input" spellcheck="false" placeholder="Paste logs, config or notes here, then press Mask (Ctrl+Enter)."></textarea>
+      <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="input" placeholder="Paste logs, config or notes here, then press Mask (Ctrl+Enter)."></textarea>
       <div class="row">
         <button class="primary" id="maskBtn">Mask</button>
         <button id="sampleBtn">Load sample</button>
@@ -109,7 +112,7 @@ td.oneway{color:var(--muted);font-style:italic;font-family:system-ui,sans-serif}
     </div>
     <div class="card">
       <h2>Masked (paste this into your AI chat)</h2>
-      <textarea id="output" spellcheck="false" readonly></textarea>
+      <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="output" readonly></textarea>
       <div class="row">
         <button class="primary" id="copyOutBtn">Copy</button>
         <span class="stats" id="stats"></span>
@@ -120,12 +123,12 @@ td.oneway{color:var(--muted);font-style:italic;font-family:system-ui,sans-serif}
   <div class="grid">
     <div class="card">
       <h2>AI reply</h2>
-      <textarea id="reply" spellcheck="false" placeholder="Paste the AI's answer here to swap the tokens back to real values."></textarea>
-      <div class="row"><button class="primary" id="restoreBtn">Restore</button></div>
+      <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="reply" placeholder="Paste the AI's answer here to swap the tokens back to real values."></textarea>
+      <div class="row"><button class="primary" id="restoreBtn">Restore</button><span class="stats" id="restoreStats"></span></div>
     </div>
     <div class="card">
       <h2>Restored</h2>
-      <textarea id="restored" spellcheck="false" readonly></textarea>
+      <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="restored" readonly></textarea>
       <div class="row"><button class="primary" id="copyRestoredBtn">Copy</button></div>
     </div>
   </div>
@@ -529,10 +532,62 @@ function maskText(text){
   return t.replace(/\uE000([\uE010-\uE019]+)\uE001/g, (m, s) => PH[dec(s)]);
 }
 
+// Restore tolerates the ways AI replies reformat tokens: any case ([user_1]), markdown escapes (\[USER\_1\]),
+// a space or hyphen for the underscore ([USER 1]), a missing bracket, a plural (USER_1s), and invisible
+// characters inside. Only labels used in this session are matched loosely; bare words need the underscore,
+// so prose like "user 1 of 3" is never touched.
+const ZW = '[\\u200B-\\u200D\\u2060\\uFEFF]*';
 function restoreText(text){
-  return text
-    .replace(/\[([A-Z][A-Z0-9_]*_\d+)\]/g, m => S.rev.has(m) ? S.rev.get(m) : m)
-    .replace(/(?<![\[\w])([A-Z][A-Z0-9_]*_\d+)(?![\]\w])/g, (m, x) => S.rev.has('[' + x + ']') ? S.rev.get('[' + x + ']') : m);
+  const res = { text, restored: 0, unknown: [], oneWay: [] };
+  const oneWay = new Set(S.rows.filter(r => r.orig === null).map(r => r.token));
+  const labels = [...new Set(S.rows.map(r => r.token.slice(1, r.token.lastIndexOf('_'))))].sort((a, b) => b.length - a.length);
+  const seen = new Set();
+  const note = (list, tok) => { if (!seen.has(tok)){ seen.add(tok); list.push(tok); } };
+  const resolve = (label, n, sfx, m) => {
+    const tok = '[' + label.toUpperCase().replace(/[^A-Z0-9]+/g, '_') + '_' + n + ']';
+    if (S.rev.has(tok)){ res.restored++; return S.rev.get(tok); }
+    if (oneWay.has(tok)){ note(res.oneWay, tok); return sfx ? tok.slice(0, -1) + sfx + ']' : tok; }
+    note(res.unknown, m.trim());
+    return m;
+  };
+  // Resolved pieces are held in private-use placeholders until the end, so the second pass can't re-match
+  // a token the first pass wrote back, or text inside a restored value.
+  const held = [];
+  const hold = s => { held.push(s); return '' + enc(held.length - 1) + ''; };
+  let t = text;
+  if (labels.length){
+    const SEP = `${ZW}[ \\u00a0]?(?:\\\\?_|[ \\u00a0-])[ \\u00a0]?${ZW}`;            // between label and number
+    const L = labels.map(l => l.split('_').map(esc).join(`(?:\\\\?_|[ \\u00a0-])`)).join('|');
+    const LB = labels.map(l => l.split('_').map(esc).join('\\\\?_')).join('|');   // bare: underscores only
+    const SFX = '(:\\\\?\\*\\\\?\\*\\\\?\\*\\\\?\\*\\d{4})?';                      // card suffix, maybe escaped
+    const bracketed = new RegExp(
+      // \[USER\_1\]: markdown-escaped on both sides (a lone "\" before "[" is a path, as in C:\Users\[USER_1])
+      `\\\\\\[\\s*${ZW}(${L})${SEP}(\\d+)${SFX}${ZW}\\s*\\\\\\]` +
+      // [USER_1] [user 1] [User-1]
+      `|\\[\\s*${ZW}(${L})${SEP}(\\d+)${SFX}${ZW}\\s*\\]`, 'gi');
+    // USER_1, USER\_1, [USER_1 or USER_1] with one bracket missing, plural USER_1s. Upper case only:
+    // a bare lowercase user_1 is far more likely a code identifier than a reformatted token.
+    const bare = new RegExp(`(?<![A-Za-z0-9_])\\[?(${LB})\\\\?_(\\d+)(?![0-9])\\]?(?=(?:'?s)?(?![A-Za-z0-9_]))`, 'g');
+    t = t.replace(bracketed, (m, l1, n1, s1, l2, n2, s2) => hold(resolve(l1 || l2, n1 || n2, (s1 || s2 || '').replace(/\\/g, ''), m)))
+         .replace(bare, (m, l, n) => hold(resolve(l, n, '', m)));
+  }
+  // Token-shaped text with a label this session never used: the AI invented it or it came from another session.
+  t.replace(/\[([A-Z][A-Z0-9_]*_\d+)(?::\*{4}\d{4})?\]/g, m => { note(res.unknown, m); return m; });
+  res.text = t.replace(/([-]+)/g, (m, s) => held[dec(s)]);
+  return res;
+}
+
+function renderRestoreStats(r){
+  const el = $('restoreStats');
+  const parts = [];
+  if (!S.rows.length && r.unknown.length) parts.push('The mapping is empty (cleared, or a new tab), so nothing can be restored.');
+  else {
+    parts.push('Restored ' + r.restored + (r.restored === 1 ? ' value.' : ' values.'));
+    if (r.unknown.length) parts.push('Not restored, not from this session: ' + r.unknown.slice(0, 12).join(', ') + (r.unknown.length > 12 ? ' and ' + (r.unknown.length - 12) + ' more.' : '.'));
+    if (r.oneWay.length) parts.push('One-way, kept as tokens: ' + r.oneWay.slice(0, 12).join(', ') + (r.oneWay.length > 12 ? ' and ' + (r.oneWay.length - 12) + ' more.' : '.'));
+  }
+  el.textContent = parts.join(' ');
+  el.className = 'stats ' + (r.unknown.length ? 'warn' : 'ok');
 }
 
 function renderStats(){
@@ -591,14 +646,24 @@ $('sampleBtn').addEventListener('click', () => {
 });
 $('clearInputBtn').addEventListener('click', () => { $('input').value = ''; $('output').value = ''; $('stats').textContent = ''; });
 $('copyOutBtn').addEventListener('click', e => copyFrom($('output'), e.currentTarget));
-$('restoreBtn').addEventListener('click', () => { $('restored').value = restoreText($('reply').value); });
+function doRestore(){ const r = restoreText($('reply').value); $('restored').value = r.text; renderRestoreStats(r); }
+$('restoreBtn').addEventListener('click', doRestore);
+$('reply').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') doRestore(); });
 $('copyRestoredBtn').addEventListener('click', e => copyFrom($('restored'), e.currentTarget));
 $('clearMapBtn').addEventListener('click', () => {
   if (!confirm('Clear all tokens? Text you already masked can no longer be restored.')) return;
   S.fwd.clear(); S.rev.clear(); S.cnt = {}; S.rows = []; S.learned.clear();
   ['output', 'restored'].forEach(id => { $(id).value = ''; });
+  $('restoreStats').textContent = '';
   $('stats').textContent = ''; renderMap();
 });
+
+// Text fields: autocomplete="off" stops browsers saving or restoring their contents (form history, session
+// restore, a reloaded or discarded tab); spellcheck, autocorrect, translate and writingsuggestions keep text off
+// cloud spelling, translation and writing services; the data-* attributes opt out of grammar extensions
+// (Grammarly, LanguageTool, Microsoft Editor) that send text to their servers. As a backstop, the working
+// text is cleared whenever the page is hidden for navigation or closing. The mapping stays in memory only.
+addEventListener('pagehide', () => { ['input', 'output', 'reply', 'restored'].forEach(id => { $(id).value = ''; }); });
 
 $('terms').value = DEFAULT_TERMS.join('\n');
 $('domains').value = DEFAULT_INTERNAL_DOMAINS.join('\n');
