@@ -1,0 +1,20 @@
+name: Test
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node tests/run.js --gaps
+      # Optional: add a PUBLIC_SAFETY_DENYLIST repository secret (one term per line) to extend this check.
+      - run: node tests/public-safety.js
+        env:
+          PUBLIC_SAFETY_DENYLIST: ${{ secrets.PUBLIC_SAFETY_DENYLIST }}

@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Blocks all network access from this page: nothing you paste can leave your PC through it. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paste Masker</title>
+<style>
+:root{
+  --bg:#f6f6f3;--panel:#ffffff;--text:#1d1d1f;--muted:#6b6b70;--border:#dcdcd6;
+  --accent:#5b54d6;--accent-text:#ffffff;--warn-bg:#fff6e5;--warn:#7a5200;--ok:#1f7a4d;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#141416;--panel:#1d1d21;--text:#ececef;--muted:#9a9aa3;--border:#34343a;
+  --accent:#8c86ff;--accent-text:#141416;--warn-bg:#2a2311;--warn:#f0c46b;--ok:#6fd3a0;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1200px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}
+h2{font-size:15px;margin:0 0 8px}
+p.sub{margin:0 0 16px;color:var(--muted)}
+.warn{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:10px 12px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:820px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px}
+textarea{width:100%;min-height:240px;resize:vertical;font:12.5px/1.45 var(--mono);color:var(--text);
+  background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px}
+textarea.small{min-height:90px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+button{font:inherit;border:1px solid var(--border);background:var(--panel);color:var(--text);
+  border-radius:8px;padding:7px 14px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:600}
+button:hover{filter:brightness(1.05)}
+.stats{color:var(--muted);font-size:13px}
+.stats.ok{color:var(--ok)}
+details summary{cursor:pointer;font-weight:600}
+.opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 16px;margin:12px 0}
+.opts label{display:flex;gap:8px;align-items:flex-start}
+.sub-opt{color:var(--muted)}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media (max-width:820px){.three{grid-template-columns:1fr}}
+.hint{color:var(--muted);font-size:12.5px;margin:2px 0 6px}
+table{width:100%;border-collapse:collapse;font:12.5px/1.4 var(--mono)}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top;word-break:break-all}
+th{font-family:system-ui,sans-serif;color:var(--muted);font-weight:600}
+td.oneway{color:var(--muted);font-style:italic;font-family:system-ui,sans-serif}
+</style>
+</head>
+<body>
+<main>
+  <h1>Paste Masker</h1>
+  <p class="sub">1. Paste raw text and press Mask. 2. Copy the masked text into your AI chat. 3. Paste the AI's reply at the bottom and press Restore.
+  Tokens stay consistent until you clear the mapping or close the tab. Nothing is saved, and this page cannot make network requests.</p>
+
+  <div class="warn"><strong>Read the masked output before pasting.</strong> Pattern matching misses things: names in free text, unusual password formats,
+  IDs only you would recognise. Add anything it missed to Custom terms. Masking reduces risk; it doesn't replace the data-handling rules that apply to you.</div>
+
+  <div class="card">
+    <details open>
+      <summary>Settings</summary>
+      <div class="opts">
+        <label><input type="checkbox" data-g="secrets" checked> Secrets and tokens (one-way)</label>
+        <label><input type="checkbox" data-g="cards" checked> Card numbers (one-way, keeps last 4)</label>
+        <label><input type="checkbox" data-g="bvn" checked> BVN / NIN (one-way)</label>
+        <label><input type="checkbox" data-g="account" checked> Account numbers (after "account no", "NUBAN")</label>
+        <label><input type="checkbox" data-g="phones" checked> Phone numbers</label>
+        <label><input type="checkbox" data-g="emails" checked> Emails and UPNs</label>
+        <label class="sub-opt"><input type="checkbox" id="keepEmailDomain"> Keep email domain (mask only the name)</label>
+        <label><input type="checkbox" data-g="users" checked> Usernames (profile paths, DOMAIN\user)</label>
+        <label><input type="checkbox" data-g="hosts" checked> Hostnames and cloud resource names (DESKTOP-, UNC, internal domains, Azure)</label>
+        <label><input type="checkbox" data-g="guids" checked> GUIDs (tenant, object, device IDs)</label>
+        <label><input type="checkbox" data-g="sids" checked> Domain SIDs (keeps the RID, e.g. -500)</label>
+        <label><input type="checkbox" data-g="macs" checked> MAC addresses</label>
+        <label><input type="checkbox" data-g="ips" checked> IP addresses (IPv4, IPv6, defanged)</label>
+        <label class="sub-opt"><input type="checkbox" id="keepPublicIp"> Keep public IPs (e.g. attacker IPs for intel)</label>
+      </div>
+      <div class="three">
+        <div>
+          <h2>Custom terms</h2>
+          <p class="hint">One per line. Optional label: <code>Acme Ltd | ORG</code></p>
+          <textarea id="terms" class="small" spellcheck="false" placeholder="Acme Ltd | ORG&#10;NAS-01 | HOST&#10;Jane Doe | PERSON"></textarea>
+        </div>
+        <div>
+          <h2>Internal domains</h2>
+          <p class="hint">Any host under these becomes HOST_n.</p>
+          <textarea id="domains" class="small" spellcheck="false" placeholder="corp.acme.com&#10;acme.local"></textarea>
+        </div>
+        <div>
+          <h2>Never mask</h2>
+          <p class="hint">Exact values to leave as they are.</p>
+          <textarea id="allow" class="small" spellcheck="false"></textarea>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Raw text</h2>
+      <textarea id="input" spellcheck="false" placeholder="Paste logs, config or notes here, then press Mask (Ctrl+Enter)."></textarea>
+      <div class="row">
+        <button class="primary" id="maskBtn">Mask</button>
+        <button id="sampleBtn">Load sample</button>
+        <button id="clearInputBtn">Clear</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Masked (paste this into your AI chat)</h2>
+      <textarea id="output" spellcheck="false" readonly></textarea>
+      <div class="row">
+        <button class="primary" id="copyOutBtn">Copy</button>
+        <span class="stats" id="stats"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>AI reply</h2>
+      <textarea id="reply" spellcheck="false" placeholder="Paste the AI's answer here to swap the tokens back to real values."></textarea>
+      <div class="row"><button class="primary" id="restoreBtn">Restore</button></div>
+    </div>
+    <div class="card">
+      <h2>Restored</h2>
+      <textarea id="restored" spellcheck="false" readonly></textarea>
+      <div class="row"><button class="primary" id="copyRestoredBtn">Copy</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-top:0;justify-content:space-between">
+      <h2 style="margin:0">Mapping (this session only)</h2>
+      <button id="clearMapBtn">Clear mapping</button>
+    </div>
+    <table>
+      <thead><tr><th style="width:34%">Token</th><th>Original</th></tr></thead>
+      <tbody id="mapBody"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+// ===== Edit these defaults locally. This file never leaves your PC. =====
+const DEFAULT_TERMS = [
+  // 'Example Org | ORG',
+];
+const DEFAULT_INTERNAL_DOMAINS = [
+  // 'corp.example.com',
+];
+const DEFAULT_NEVER_MASK = [];
+// ========================================================================
+
+const $ = id => document.getElementById(id);
+const S = { fwd: new Map(), rev: new Map(), cnt: {}, rows: [] };
+let PH = [], RUN = { counts: {} }, CFG = { on: {} }, ALLOW = new Set();
+
+const WELL_KNOWN_DOMAINS = new Set(['nt authority','authority','builtin','nt service','service','window manager',
+  'font driver host','workgroup','hklm','hkcu','hkcr','hku','hkcc','hkey_local_machine','hkey_current_user',
+  'hkey_classes_root','hkey_users','hkey_current_config']);
+const SKIP_USERS = new Set(['public','default','default user','all users','shared','administrator','system',
+  'guest','krbtgt','localservice','networkservice']);
+const BENIGN = /^(true|false|null|none|n\/a|yes|no|required|optional|redacted|\*+|x+)$/i;
+// Card prefixes (IIN): Visa, Mastercard incl. 2-series, Amex, Discover, JCB, UnionPay, Diners, Verve, Maestro.
+// Luhn alone also passes IMEIs and random IDs, so a number must match one of these to count as a card.
+const CARD_IIN = /^(?:4\d{12}(?:\d{3}){0,2}|5[1-5]\d{14}|2(?:2[2-9]\d|[3-6]\d\d|7[01]\d|720)\d{12}|3[47]\d{13}|6(?:011|5\d\d)\d{12,15}|35(?:2[89]|[3-8]\d)\d{12,15}|62\d{14,17}|3(?:0[0-5]|[689]\d)\d{11,16}|50(?:6[01]|7[89])\d{12,15}|6500\d{12,15}|(?:5018|5020|5038|5893|6304|6759|676[1-3])\d{8,15})$/;
+// Explicit list, so dotted usernames like CORP\jane.doe are still treated as users.
+const FILE_EXT = /\.(?:exe|dll|sys|drv|ocx|cpl|scr|com|msi|msp|ps1|psm1|psd1|bat|cmd|vbs|vbe|js|jse|wsf|hta|lnk|url|reg|inf|ini|cfg|conf|config|xml|json|ya?ml|csv|txt|log|evtx|etl|dmp|tmp|dat|db|sqlite|zip|rar|7z|gz|tar|iso|img|vhdx?|docx?|docm|xlsx?|xlsm|pptx?|pdf|rtf|one|html?|php|aspx?|jsp|py|sh|jar|bin|key|pem|pfx|cer|crt)$/i;
+// True when a DOMAIN\user-shaped match is really the next folder of a path whose folder names contain spaces,
+// e.g. "Files\Microsoft" inside "C:\Program Files\Microsoft Office\...".
+function insideSpacedPath(all, off, pre){
+  if (pre !== ' ') return false;
+  // Look back at most 400 characters (longer than a Windows path), so long lines stay linear.
+  const line = all.slice(Math.max(all.lastIndexOf('\n', off) + 1, off - 400), off + 1);
+  const m = line.match(/(?:[A-Za-z]:\\|\\\\|%[A-Za-z_]+%\\)[^"'<>|,;\t\r\n]*$/);
+  if (!m) return false;
+  const words = m[0].slice(m[0].lastIndexOf('\\') + 1).trim().split(' ');
+  return words.length <= 3 && !FILE_EXT.test(words[0]) && !words.some(w => /^[-\/]/.test(w));
+}
+
+// Placeholders use private-use characters so later patterns never re-match an existing token.
+function enc(n){ return String(n).split('').map(d => String.fromCharCode(0xE010 + Number(d))).join(''); }
+function dec(s){ return Number(Array.from(s).map(c => c.charCodeAt(0) - 0xE010).join('')); }
+function place(str){ PH.push(str); return '\uE000' + enc(PH.length - 1) + '\uE001'; }
+function esc(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function fnv(s){ let h = 0x811c9dc5; for (let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16); }
+function luhn(d){ let s = 0, alt = false; for (let i = d.length - 1; i >= 0; i--){ let n = +d[i]; if (alt){ n *= 2; if (n > 9) n -= 9; } s += n; alt = !alt; } return s % 10 === 0; }
+
+// Same value -> same token for the whole session, so correlation still works.
+function mk(label, value, o = {}){
+  const norm = o.norm !== undefined ? o.norm : value.toLowerCase();
+  if (ALLOW.has(value.toLowerCase()) || ALLOW.has(norm)) return value;
+  const key = label + '|' + (o.oneWay ? '#' + fnv(norm) : norm);
+  let t = S.fwd.get(key);
+  if (!t){
+    S.cnt[label] = (S.cnt[label] || 0) + 1;
+    t = '[' + label + '_' + S.cnt[label] + ']';
+    S.fwd.set(key, t);
+    S.rows.push({ token: t, orig: o.oneWay ? null : value });
+    if (!o.oneWay) S.rev.set(t, value);
+  }
+  RUN.counts[label] = (RUN.counts[label] || 0) + 1;
+  return place(o.suffix ? t.slice(0, -1) + o.suffix + ']' : t);
+}
+
+function isPriv4(ip){
+  const [a, b] = ip.split('.').map(Number);
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+         (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+}
+function normPhone(d){
+  if (d.startsWith('234')) return '0' + d.slice(3);
+  if (d.startsWith('44')) return '0' + d.slice(2);
+  return d;
+}
+
+const KV_KEYS = 'aws_secret_access_key|client_secret|clientsecret|api[_-]?key|apikey|access[_-]?key|secret|password|passwd|pwd|access_token|refresh_token|id_token|token|sig|accountkey|sharedaccesskey';
+// Quoted values may contain spaces: password="correct horse battery".
+const KV_QUOTED_RE = new RegExp('\\b(' + KV_KEYS + ')(\\s*["\']?\\s*[:=]\\s*)(["\'])([^"\'\\n\\uE000-\\uE0FF]{1,256})\\3', 'gi');
+// "&" is allowed in a value except inside a URL query string, where it starts the next parameter.
+const KV_RE = new RegExp('\\b(' + KV_KEYS + ')(\\s*["\']?\\s*[:=]\\s*["\']?)([^\\s"\';,<>\\uE000-\\uE0FF]{4,})', 'gi');
+
+// ---- Credentials in command lines and URLs (all one-way) ----
+const PUA = '\\uE000-\\uE0FF';   // placeholder range: never re-match an existing token
+const CV = `("[^"\\n${PUA}]{1,128}"|'[^'\\n${PUA}]{1,128}'|[^\\s"'(${PUA}]{1,128})`;   // quoted or bare value
+// Variables, prompts and placeholders are not secrets: $pass, %PW%, *, <password>, {{pw}}.
+const NOT_A_SECRET = /^(?:\$[\w:{}.]+|%\w+%|\*|<[^>]*>|\{\{[^}]*\}\}|\[[A-Z0-9_]+\])$/;
+const CMD_CREDS = [
+  // net user NAME PASSWORD
+  // (the value must be followed by a /switch, a quote or the end of the line, so prose like "ran net user to list" is left alone)
+  new RegExp(`(\\bnet1?(?:\\.exe)?[ \\t]+user[ \\t]+(?:"[^"\\n]+"|[^\\s/"]\\S*)[ \\t]+)(?![/-])${CV}(?=[ \\t]+/|[ \\t]*["'\\r\\n;&|)]|[ \\t]*$)`, 'gim'),
+  // net use [X:] \\host\share PASSWORD  or  ... /user:NAME PASSWORD
+  new RegExp(`(\\bnet1?(?:\\.exe)?[ \\t]+use[ \\t]+(?:[A-Za-z*]:[ \\t]+)?\\S+[ \\t]+(?:/user:\\S+[ \\t]+)?)(?![/-])${CV}(?=[ \\t]+/|[ \\t]*["'\\r\\n;&|)]|[ \\t]*$)`, 'gim'),
+  // Flags that only ever take a password.
+  new RegExp(`((?:^|[ \\t])(?:--password|--passwd|--pass|--http-password|--proxy-password|-Password|-NewPassword|-OldPassword|-AccountPassword|-pw|/rp|/password|/pwd)(?:[ \\t]+|[:=]))(?![-/])${CV}`, 'gim'),
+  // -p / /p only for tools where it means password (elsewhere it is a port, a flag or a path).
+  new RegExp(`(\\b(?:psexec(?:64)?|paexec|sshpass|hydra|medusa|crackmapexec|cme|nxc|netexec|evil-winrm|wmiexec|smbexec|atexec|dcomexec|psexec\\.py|rdesktop|plink|pscp|xfreerdp|wfreerdp)(?:\\.exe|\\.py)?\\b[^\\n]{0,500}?[ \\t](?:-p[ \\t]+|/p:))(?![-/])${CV}`, 'gi'),
+  new RegExp(`(\\b(?:sqlcmd|bcp|osql)(?:\\.exe)?\\b[^\\n]{0,500}?[ \\t]-P[ \\t]*)(?![-/])${CV}`, 'g'),
+  // mysql -pSECRET (attached; "-p" alone prompts)
+  new RegExp(`(\\bmysql(?:dump|admin|sh)?(?:\\.exe)?\\b[^\\n]{0,500}?[ \\t]-p)([^\\s"'${PUA}]{1,128})`, 'gi'),
+  // curl/wget -u user:PASSWORD
+  new RegExp(`(\\b(?:curl|wget)(?:\\.exe)?\\b[^\\n]{0,500}?[ \\t](?:-u|--user|--http-user)(?:[ \\t]+|=)["']?[^\\s:"'${PUA}]+:)([^\\s"'${PUA}]{1,128})`, 'gi'),
+  // smbclient -U user%PASSWORD
+  new RegExp(`(\\b(?:smbclient|rpcclient|winexe)\\b[^\\n]{0,500}?[ \\t]-U[ \\t]+["']?[^\\s%"']+%)([^\\s"'${PUA}]{1,128})`, 'gi'),
+  // domain/user:PASSWORD@host (impacket-style targets)
+  new RegExp(`((?<![\\w./:-])[A-Za-z0-9.-]+/[A-Za-z0-9._$-]+:)([^\\s@/"'${PUA}]{1,128})(?=@)`, 'g'),
+  new RegExp(`(ConvertTo-SecureString[ \\t]+(?:-String[ \\t]+)?)${CV}`, 'gi'),
+  new RegExp(`(-pass(?:in|out)?[ \\t]+pass:)([^\\s"'${PUA}]{1,128})`, 'g'),
+  new RegExp(`(\\b(?:Proxy-)?Authorization[ \\t]*:[ \\t]*(?:Basic|Digest|NTLM|Negotiate)[ \\t]+)([A-Za-z0-9+/=._~-]{8,})`, 'gi'),
+];
+// scheme://user:PASSWORD@host \u2014 the user is reversible, the password one-way.
+const URL_USERINFO = new RegExp(`(\\b[a-z][a-z0-9+.-]{1,15}://)([^\\s/:@${PUA}]{1,64})(:)([^\\s/@${PUA}]{1,128})(@)`, 'gi');
+const URL_QS_SECRET = new RegExp(`([?&](?:code|signature|key|apikey|api_key|client_secret|pass|auth|session|sessionid|session_id|jwt|x-amz-signature|x-amz-security-token|x-amz-credential|x-goog-signature|x-goog-credential)=)([^&#\\s"'<>${PUA}]{6,})`, 'gi');
+const ENTRA_SECRET = /(?<![A-Za-z0-9~._-])[A-Za-z0-9_-]{3}\dQ~[A-Za-z0-9~._-]{31,34}(?![A-Za-z0-9~._-])/g;
+
+function secretVal(v){
+  const q = /^["']/.test(v) ? v[0] : '';
+  const inner = q ? v.slice(1, -1) : v;
+  return (NOT_A_SECRET.test(inner) || BENIGN.test(inner)) ? v : q + mk('SECRET', inner, { oneWay: true }) + q;
+}
+
+// ---- Cloud resource names (reversible, keep the service suffix as signal) ----
+const AZ_RES = /(?<![A-Za-z0-9.-])([a-z0-9][a-z0-9-]{0,62})(\.(?:privatelink\.)?(?:(?:blob|file|queue|table|dfs|web)\.core\.windows\.net|servicebus\.windows\.net|database\.windows\.net|vault\.azure\.net|scm\.azurewebsites\.net|azurewebsites\.net|azure-api\.net|azurefd\.net|azurecr\.io|documents\.azure\.com|onmicrosoft\.com|sharepoint\.com))(?![A-Za-z0-9-])/gi;
+function azLabel(sfx){
+  const s = sfx.toLowerCase();
+  if (s.includes('core.windows.net')) return 'AZ_STORAGE';
+  if (s.includes('servicebus')) return 'AZ_SERVICEBUS';
+  if (s.includes('database.windows')) return 'AZ_SQL';
+  if (s.includes('vault.azure')) return 'AZ_KEYVAULT';
+  if (s.includes('azurecr')) return 'AZ_REGISTRY';
+  if (s.includes('documents.azure')) return 'AZ_COSMOS';
+  if (s.includes('onmicrosoft') || s.includes('sharepoint')) return 'TENANT';
+  return 'AZ_APP';
+}
+const AZ_ACCOUNT = /(\bAccountName\s*=\s*)([a-z0-9]{3,24})(?=[;\s"']|$)/gi;
+const UNC_HOST = /(\\\\)([A-Za-z0-9][A-Za-z0-9-]{0,62}(?:\.[A-Za-z0-9-]+)*)(?=\\)/g;
+const IPV4_RE = /(?<!\d)(?<!\d\.)(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.|\[\.\]|\(\.\))){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?!\d)(?!\.\d)/g;
+const IPV6_RE = /(?<![0-9A-Fa-f:.])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})?|::[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})(?![0-9A-Fa-f:])/g;
+
+// Order matters: most specific first.
+const DETECTORS = [
+  { g: 'secrets', run: t => t
+    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, m => mk('PRIVATE_KEY', m, { oneWay: true }))
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, m => mk('JWT', m, { oneWay: true }))
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, m => mk('AWS_KEY', m, { oneWay: true }))
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})/g, m => mk('TOKEN', m, { oneWay: true }))
+    .replace(/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, m => mk('TOKEN', m, { oneWay: true }))
+    .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, m => mk('API_KEY', m, { oneWay: true }))
+    .replace(/(\bBearer\s+)([A-Za-z0-9\-._~+\/]{16,}=*)/gi, (m, p, v) => p + mk('TOKEN', v, { oneWay: true }))
+    .replace(URL_USERINFO, (m, s, u, c, p, at) => NOT_A_SECRET.test(p) ? m : s + mk('USER', u) + c + mk('SECRET', p, { oneWay: true }) + at)
+    .replace(KV_QUOTED_RE, (m, k, sep, q, v) => BENIGN.test(v) || NOT_A_SECRET.test(v) ? m : k + sep + q + mk('SECRET', v, { oneWay: true }) + q)
+    .replace(KV_RE, (m, k, sep, v, off, all) => {
+      let rest = '';
+      if (/[?&]/.test(all[off - 1] || '')){ const i = v.indexOf('&'); if (i >= 0){ rest = v.slice(i); v = v.slice(0, i); } }
+      if (v.length < 4 || BENIGN.test(v) || NOT_A_SECRET.test(v)) return m;
+      return k + sep + mk('SECRET', v, { oneWay: true }) + rest;
+    })
+    .replace(URL_QS_SECRET, (m, k, v) => k + mk('SECRET', v, { oneWay: true }))
+    .replace(ENTRA_SECRET, m => mk('SECRET', m, { oneWay: true }))
+    .replace(/[\s\S]*/, t2 => CMD_CREDS.reduce((acc, re) => acc.replace(re, (m, pre, v) =>
+      // Capital -P is a port or a wordlist for every listed tool except the SQL ones.
+      /(?:^|[ \t])-P[ \t]*$/.test(pre) && !/\b(?:sqlcmd|bcp|osql)\b/i.test(pre) ? m : pre + secretVal(v)), t2))
+  },
+  // GUIDs run before the number detectors: an all-digit GUID segment can otherwise look like a card or phone.
+  { g: 'guids', run: t => t.replace(/(?<![0-9A-Fa-f-])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9A-Fa-f-])/gi, m => mk('GUID', m)) },
+  { g: 'bvn', run: t => t.replace(/\b(BVN|NIN)(\s*(?:no\.?|number|num|#)?\s*[:=#-]?\s*)(\d{11})(?!\d)/gi,
+      (m, k, s, v) => k + s + mk(k.toUpperCase(), v, { oneWay: true })) },
+  { g: 'account', run: t => t.replace(/\b(account|acct|a\/c|nuban)(\s*(?:no\.?|number|num|#)?\s*[:=#-]?\s*)(\d{10})(?!\d)/gi,
+      (m, k, s, v) => k + s + mk('ACCOUNT', v)) },
+  { g: 'phones', run: t => {
+      const f = m => { const d = m.replace(/\D/g, ''); return (d.length < 10 || d.length > 15) ? m : mk('PHONE', m, { norm: normPhone(d) }); };
+      return t
+        .replace(/(?<![\d+])(?:\+?234[\s-]?|0)[789][01]\d[\s-]?\d{3}[\s-]?\d{4}(?!\d)/g, f)
+        .replace(/(?<![\d+])(?:\+?44[\s-]?|0)7\d{3}[\s-]?\d{6}(?!\d)/g, f)
+        .replace(/(?<![\w+])\+\d{1,3}[\s-]?\(?\d{1,4}\)?(?:[\s-]?\d{2,4}){2,4}(?!\d)/g, f);
+    } },
+  { g: 'cards', run: t => t.replace(/(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)/g, m => {
+      const d = m.replace(/\D/g, '');
+      if (!CARD_IIN.test(d) || !luhn(d) || /^(\d)\1+$/.test(d)) return m;
+      return mk('CARD', d, { oneWay: true, suffix: ':****' + d.slice(-4) });
+    }) },
+  // Bounded repeats keep this linear: the old open-ended pattern could freeze for ~40 s on long dotted runs.
+  { g: 'emails', run: t => t.replace(/(?<![A-Za-z0-9._%+-])[A-Za-z0-9][A-Za-z0-9._%+-]{0,63}@(?:[A-Za-z0-9-]{1,63}\.){1,8}[A-Za-z]{2,24}\b/g, m => {
+      if (CFG.keepEmailDomain){ const i = m.lastIndexOf('@'); return mk('USER', m.slice(0, i)) + m.slice(i); }
+      return mk('EMAIL', m);
+    }) },
+  { g: 'users', run: t => t
+    .replace(/([A-Za-z]:\\(?:Users|Documents and Settings)\\)([^\\\/\s"'<>|:\uE000-\uE0FF]+)/gi,
+      (m, p, u) => SKIP_USERS.has(u.toLowerCase()) ? m : p + mk('USER', u))
+    .replace(/(^|[\s"'=(])(\/(?:home|Users)\/)([^\/\s"'<>|:\uE000-\uE0FF]+)/gm,
+      (m, pre, p, u) => SKIP_USERS.has(u.toLowerCase()) ? m : pre + p + mk('USER', u))
+    .replace(/(^|[\s"'=(,;\[:])([A-Za-z][A-Za-z0-9-]{0,14})\\([A-Za-z0-9._$-]{1,64})(?![\\\w$-])/gm, (m, pre, dom, u, off, all) => {
+      if (WELL_KNOWN_DOMAINS.has(dom.toLowerCase())) return m;
+      // A file name (Temp\x.ps1, Office16\WINWORD.EXE) or a folder inside a spaced path is not DOMAIN\user.
+      if (FILE_EXT.test(u) && !u.endsWith('$') || insideSpacedPath(all, off, pre)) return m;
+      return pre + mk('NETBIOS', dom) + '\\' + (SKIP_USERS.has(u.toLowerCase()) ? u : mk('USER', u));
+    })
+  },
+  { g: 'hosts', run: t => {
+      for (const s of CFG.domains){
+        const re = new RegExp('(?<![A-Za-z0-9.-])((?:[A-Za-z0-9-]+\\.)*)(' + esc(s) + ')(?![A-Za-z0-9-]|\\.[A-Za-z0-9])', 'gi');
+        t = t.replace(re, (m, sub) => sub ? mk('HOST', m) : mk('ORG_DOMAIN', m));
+      }
+      // \\host\share — IP hosts are left for the IP detector so they keep their PRIVATE/PUBLIC label.
+      t = t.replace(UNC_HOST, (m, p, h) => /^[\d.]+$/.test(h) || /^localhost$/i.test(h) ? m : p + mk('HOST', h));
+      t = t.replace(AZ_RES, (m, name, sfx) => {
+        let pre = name, my = '';
+        if (/sharepoint/i.test(sfx) && /-my$/i.test(name)){ pre = name.slice(0, -3); my = name.slice(-3); }
+        return mk(azLabel(sfx), pre) + my + sfx;
+      });
+      t = t.replace(AZ_ACCOUNT, (m, k, name) => k + mk('AZ_STORAGE', name));
+      return t.replace(/\b(?:DESKTOP|LAPTOP|WIN|SRV)-[A-Z0-9]{4,15}\b/gi, m => mk('HOST', m));
+    } },
+  { g: 'terms', always: true, run: t => {
+      for (const { term, label } of CFG.terms){
+        const re = new RegExp('(?<![A-Za-z0-9])' + esc(term) + '(?![A-Za-z0-9])', 'gi');
+        t = t.replace(re, m => mk(label, m, { norm: term.toLowerCase() }));
+      }
+      return t;
+    } },
+  { g: 'sids', run: t => t.replace(/\bS-1-5-21-(\d+-\d+-\d+)(?=-\d+\b|\b)/g, (m, d) => 'S-1-5-21-' + mk('DOMAIN_SID', d)) },
+  { g: 'macs', run: t => t.replace(/\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b/g,
+      m => /^(?:00[:-]){5}00$|^(?:ff[:-]){5}ff$/i.test(m) ? m : mk('MAC', m, { norm: m.toLowerCase().replace(/-/g, ':') })) },
+  { g: 'ips', run: t => {
+      t = t.replace(IPV4_RE, m => {
+        const ip = m.replace(/\[\.\]|\(\.\)/g, '.');
+        const a = +ip.split('.')[0];
+        if (a === 127 || a === 0 || ip === '255.255.255.255') return m;
+        const priv = isPriv4(ip);
+        if (!priv && CFG.keepPublicIp) return m;
+        return mk(priv ? 'PRIVATE_IP' : 'PUBLIC_IP', m, { norm: ip });
+      });
+      return t.replace(IPV6_RE, m => {
+        const lm = m.toLowerCase();
+        if ((lm.match(/[0-9a-f]+/g) || []).length < 2 || lm === '::1') return m;
+        const priv = /^(fe[89ab]|f[cd])/.test(lm);
+        if (!priv && CFG.keepPublicIp) return m;
+        return mk(priv ? 'PRIVATE_IP' : 'PUBLIC_IP', m, { norm: lm });
+      });
+    } }
+];
+
+function readCfg(){
+  CFG = { on: {} };
+  document.querySelectorAll('[data-g]').forEach(cb => { CFG.on[cb.dataset.g] = cb.checked; });
+  CFG.keepEmailDomain = $('keepEmailDomain').checked;
+  CFG.keepPublicIp = $('keepPublicIp').checked;
+  CFG.terms = $('terms').value.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#')).map(l => {
+    const i = l.lastIndexOf('|');
+    let term = l, label = 'TERM';
+    if (i > 0){
+      term = l.slice(0, i).trim();
+      label = l.slice(i + 1).trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_') || 'TERM';
+      if (/^[^A-Z]/.test(label)) label = 'T_' + label;
+    }
+    return { term, label };
+  }).filter(x => x.term.length > 1).sort((a, b) => b.term.length - a.term.length);
+  CFG.domains = $('domains').value.split(/[\s,]+/).map(s => s.trim().replace(/^\*?\./, ''))
+    .filter(s => s.includes('.')).sort((a, b) => b.length - a.length);
+  ALLOW = new Set($('allow').value.split(/\r?\n/).map(s => s.trim().toLowerCase()).filter(Boolean));
+}
+
+function maskText(text){
+  PH = []; RUN = { counts: {} };
+  let t = text;
+  for (const d of DETECTORS) if (d.always || CFG.on[d.g]) t = d.run(t);
+  return t.replace(/\uE000([\uE010-\uE019]+)\uE001/g, (m, s) => PH[dec(s)]);
+}
+
+function restoreText(text){
+  return text
+    .replace(/\[([A-Z][A-Z0-9_]*_\d+)\]/g, m => S.rev.has(m) ? S.rev.get(m) : m)
+    .replace(/(?<![\[\w])([A-Z][A-Z0-9_]*_\d+)(?![\]\w])/g, (m, x) => S.rev.has('[' + x + ']') ? S.rev.get('[' + x + ']') : m);
+}
+
+function renderStats(){
+  const el = $('stats');
+  const entries = Object.entries(RUN.counts);
+  if (!entries.length){ el.textContent = 'Nothing detected. Review it yourself before pasting.'; el.className = 'stats'; return; }
+  el.textContent = 'Masked: ' + entries.map(([k, v]) => v + ' ' + k).join(', ');
+  el.className = 'stats ok';
+}
+
+function renderMap(){
+  const body = $('mapBody');
+  body.textContent = '';
+  if (!S.rows.length){
+    const tr = document.createElement('tr'); const td = document.createElement('td');
+    td.colSpan = 2; td.className = 'oneway'; td.textContent = 'No tokens yet.';
+    tr.appendChild(td); body.appendChild(tr); return;
+  }
+  for (const r of S.rows){
+    const tr = document.createElement('tr');
+    const a = document.createElement('td'); a.textContent = r.token;
+    const b = document.createElement('td');
+    if (r.orig === null){ b.className = 'oneway'; b.textContent = 'not stored (one-way)'; } else b.textContent = r.orig;
+    tr.append(a, b); body.appendChild(tr);
+  }
+}
+
+function flash(btn, msg){ const old = btn.textContent; btn.textContent = msg; setTimeout(() => { btn.textContent = old; }, 1200); }
+async function copyFrom(el, btn){
+  if (!el.value) return;
+  try { await navigator.clipboard.writeText(el.value); }
+  catch (e) { el.removeAttribute('readonly'); el.select(); document.execCommand('copy'); el.setAttribute('readonly', ''); }
+  flash(btn, 'Copied');
+}
+
+function doMask(){ readCfg(); $('output').value = maskText($('input').value); renderStats(); renderMap(); }
+
+// Sample data is fictional: example domains, documentation IP ranges and test card numbers.
+const SAMPLE = `2026-11-10T09:14:22Z sign-in UPN=jane.doe@contoso.com IP=203.0.113.45 Device=DESKTOP-7FQ2K9L
+Process: C:\\Users\\jdoe\\AppData\\Local\\Temp\\updater.exe -c "token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234"
+Account CONTOSO\\jdoe, SID S-1-5-21-1111111111-2222222222-3333333333-1104, TenantId 3f2504e0-4f89-11d3-9a0c-0305e82c3301
+Host fs01.corp.contoso.com (10.20.30.40) contacted 198.51.100[.]7 from MAC 00-1A-2B-3C-4D-5E
+Command: net use \\\\fs01\\share /user:CONTOSO\\jdoe Summer2026! ; curl -u backup:Hunt3r2 https://198.51.100.20/upload
+Backup: https://contosobackup.blob.core.windows.net/data?sv=2022-11-02&sp=r&sig=Ab%2Bcd3fGh1JkLmN0pQrStUvWx%3D
+Phone +234 803 123 4567, account no: 0123456789, BVN 22212345678, card 4111 1111 1111 1111
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U
+A Contoso config file contained password=Winter2026! in plain text.`;
+
+$('maskBtn').addEventListener('click', doMask);
+$('input').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') doMask(); });
+$('sampleBtn').addEventListener('click', () => {
+  $('input').value = SAMPLE;
+  if (!$('domains').value.trim()) $('domains').value = 'contoso.com';
+  if (!$('terms').value.trim()) $('terms').value = 'Contoso | ORG';
+  doMask();
+});
+$('clearInputBtn').addEventListener('click', () => { $('input').value = ''; $('output').value = ''; $('stats').textContent = ''; });
+$('copyOutBtn').addEventListener('click', e => copyFrom($('output'), e.currentTarget));
+$('restoreBtn').addEventListener('click', () => { $('restored').value = restoreText($('reply').value); });
+$('copyRestoredBtn').addEventListener('click', e => copyFrom($('restored'), e.currentTarget));
+$('clearMapBtn').addEventListener('click', () => {
+  if (!confirm('Clear all tokens? Text you already masked can no longer be restored.')) return;
+  S.fwd.clear(); S.rev.clear(); S.cnt = {}; S.rows = [];
+  ['output', 'restored'].forEach(id => { $(id).value = ''; });
+  $('stats').textContent = ''; renderMap();
+});
+
+$('terms').value = DEFAULT_TERMS.join('\n');
+$('domains').value = DEFAULT_INTERNAL_DOMAINS.join('\n');
+$('allow').value = DEFAULT_NEVER_MASK.join('\n');
+renderMap();
+</script>
+</body>
+</html>

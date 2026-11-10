@@ -1,0 +1,4 @@
+# Private list of your own terms for tests/public-safety.js. Never commit it.
+.public-safety-denylist
+node_modules/
+.DS_Store
