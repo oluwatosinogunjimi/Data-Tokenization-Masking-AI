@@ -4,42 +4,76 @@ Paste Masker is one HTML file with inline CSS and JavaScript. It has no build st
 
 ## Components
 
+The file has two scripts. The **engine** (`<script id="engine">`) does all masking and restoring and never touches the page: no `document`, no events, no storage. The **interface** (`<script id="ui">`) reads the settings, calls the engine through one object, `PM`, and draws the results. The tests load the engine block on its own, so what they check is exactly what the page runs.
+
 | Component | Where | Responsibility |
 |---|---|---|
-| Page shell | `<head>`, `<main>` | Layout, the Content Security Policy, the settings panel and the four text areas (raw, masked, AI reply, restored). Every text area carries the privacy attributes described under [Text fields](#text-fields). |
-| Defaults | `DEFAULT_TERMS`, `DEFAULT_INTERNAL_DOMAINS`, `DEFAULT_NEVER_MASK` at the top of the script | Values loaded into the settings boxes when the page opens. Edit them in your own copy of the file. |
-| Config reader | `readCfg()` | Reads the toggles and text boxes into `CFG` (enabled groups, options, custom terms, internal domains) and `ALLOW` (never-mask list) on every Mask. |
+| Page shell | `<head>`, `<header>`, `<main>`, dialogs | The Content Security Policy, the two embedded fonts, the top bar, the Mask and Restore tabs, the mapping table, the settings drawer, the confirm dialog and the shortcuts panel. Every text field carries the privacy attributes described under [Text fields](#text-fields). |
+| Defaults | `DEFAULT_TERMS`, `DEFAULT_INTERNAL_DOMAINS`, `DEFAULT_NEVER_MASK` at the top of the engine script | Values loaded into the settings boxes when the page opens. Edit them in your own copy of the file. |
+| Engine interface | `PM` at the end of the engine script | The only way in or out of the engine (see [The PM interface](#the-pm-interface)). |
+| Config | `configure()` | Turns a plain settings object into `CFG` (enabled groups, options, custom terms, internal domains) and `ALLOW` (never-mask list). |
 | Detectors | `DETECTORS` array | Ordered list of pattern groups. Each replaces what it finds with a placeholder via `mk()`. |
-| Tokeniser | `mk(label, value, options)` | Looks up or creates the token for a value, records it in the session store, and returns a placeholder. |
+| Tokeniser | `mk(label, value, options)` | Looks up or creates the token for a value, records it in the session store, counts how often it was seen, and returns a placeholder. |
 | Placeholder layer | `place()`, `enc()`, `dec()` | Holds finished tokens out of the text while the remaining detectors run (see below). |
-| Session store | `S` | The token map for the current tab: forward map, reverse map, per-label counters and display rows. |
-| Restorer | `restoreText()`, `renderRestoreStats()` | Swaps tokens in the AI reply back to their original values using the reverse map, tolerating reformatted tokens, and reports what it couldn't restore. |
-| Renderers | `renderStats()`, `renderMap()` | The "Masked: …" summary and the mapping table. Values are written with `textContent`, never as HTML. |
-| Clipboard | `copyFrom()` | Copies output with the Clipboard API, falling back to a selection copy. |
+| Session store | `S` | The token map for the current tab: forward map, reverse map, per-label counters, mapping rows and learned domains. |
+| Restorer | `restoreText()`, `restoreReport()` | Swaps tokens in the AI reply back to their original values, tolerating reformatted tokens, and builds the report of what it couldn't restore. |
+| Interface | the `ui` script | Tabs, rendering of highlighted output, the token popover, copy, the mapping table, settings, shortcuts, theme and toasts. Values are written with `textContent`, never as HTML. |
+
+## The PM interface
+
+```text
+PM.configure({ on: { group: false }, keepEmailDomain, keepPublicIp, terms, domains, allow })
+    Groups left out of "on" are on. terms, domains and allow are arrays of lines or one newline-separated string.
+PM.mask(text)      -> { text, spans: [{ start, end, token }], counts: { LABEL: n } }
+PM.restore(text)   -> { text, restored, unknown: [token], oneWay: [token], mappingEmpty,
+                        spans: [{ start, end, token, kind: 'restored' | 'oneway' | 'unknown' }] }
+PM.report(result)  -> [{ kind, text }]   the restore report lines, built from the token lists only
+PM.rows()          -> [{ token, label, value (null if one-way), oneWay, seen }] in creation order
+PM.lookup(token)   -> one such row, or null
+PM.size()          -> number of tokens in the session
+PM.clear()         -> forget every token and learned domain
+PM.groups, PM.defaults, PM.sample   detector group names, the editable defaults, the built-in sample
+```
+
+`spans` give the position of every token in the masked text (or of every restored value, kept one-way token and unknown token in the restored text). They are collected while the placeholders are expanded, so the interface highlights tokens without parsing the text again. A card token's span shows `[CARD_1:****1111]` and names `[CARD_1]`, the token the mapping knows.
 
 ## Data flow
 
 ```mermaid
 flowchart LR
-  A[Raw text] -->|Mask| B[readCfg]
+  A[Raw text] -->|Mask| B["PM.configure(settings)"]
   B --> C[Detectors in order]
   C -->|each match| D["mk(): token from session store"]
   D --> E[Placeholder in text]
   E --> C
-  C --> F[Expand placeholders to tokens]
-  F --> G[Masked text]
-  G -->|copy| H[(AI chat)]
-  H -->|paste reply| I[Restore]
+  C --> F[Expand placeholders, record spans]
+  F --> G[Masked text + spans]
+  G --> R[Highlighted output]
+  G -->|Copy masked| H[(AI chat)]
+  H -->|paste reply| I["PM.restore()"]
   I --> J[Reverse map lookup]
-  J --> K[Restored text]
+  J --> K[Restored text + spans + report]
   D -.-> S[(Session store S, in memory)]
   J -.-> S
 ```
 
-1. **Mask.** `readCfg()` captures the settings. `maskText()` resets the placeholder list and per-run counts, learns organisation domains from the email addresses in the text, then runs each enabled detector over the text in order. Every match goes through `mk()`, which returns a placeholder. When all detectors are done, the placeholders are expanded into their visible tokens.
-2. **Copy.** The masked text is copied and pasted into an AI chat by the user. The page itself sends nothing anywhere.
-3. **Restore.** The AI reply is pasted back (Restore, or Ctrl+Enter in the reply box). `restoreText()` replaces every token it knows with the original value, including tokens the AI reformatted. One-way tokens stay tokens, unknown ones are left as they are, and a line under the button reports both.
-4. **Clear.** "Clear mapping" (or closing the tab) empties the session store. After that, earlier masked text can no longer be restored.
+1. **Mask.** The interface reads the settings drawer into a plain object and calls `PM.configure()`, then `PM.mask()`. `maskText()` resets the placeholder list and per-run counts, learns organisation domains from the email addresses in the text, then runs each enabled detector over the text in order. Every match goes through `mk()`, which returns a placeholder. When all detectors are done, the placeholders are expanded into their visible tokens and each token's position is recorded.
+2. **Review and copy.** The interface renders the masked text with one highlighted element per token. **Copy masked** copies the engine's string. The page itself sends nothing anywhere.
+3. **Restore.** The AI reply is pasted into the Restore tab. `PM.restore()` replaces every token it knows with the original value, including tokens the AI reformatted. One-way tokens stay tokens and unknown ones are left as they are; `PM.report()` turns both lists into the report under the output.
+4. **End session.** "End session" (after an in-page confirmation) calls `PM.clear()` and empties every text box and output. Closing or reloading the tab discards the store too. After that, earlier masked text can no longer be restored.
+
+## Interface
+
+- **Tabs.** "1 Mask" and "2 Restore" follow the ARIA tab pattern (arrow keys, Home and End move between tabs). Each tab has an input pane and an output pane side by side, stacked below 900 px wide, and a badge such as "26 tokens" or "8 restored". One primary button per tab: the run button until there is output, then the copy button.
+- **Highlighted output.** The output is built from text nodes and one `<span>` per token, with `createElement` and `textContent`. Joined, the text nodes are exactly the engine's string. Colour marks the category, and the token's own label stays visible, so colour is never the only cue: identity (users, people, emails, NetBIOS domains) violet, hosts and cloud resources teal, network (IPs, MACs) plum, organisation (custom terms, organisation domains, tenants) ochre, reference IDs (GUIDs, SIDs, account numbers, phones) tan, and one-way tokens grey with a dashed underline. A legend counts each category; hovering an entry outlines all its tokens.
+- **Token popover.** Hovering or focusing a token shows its token, type, how often it was seen and its real value, and outlines every occurrence. Click copies the real value, Shift-click the token; a one-way token says its value was never kept and click copies the token. On touch, a tap pins the popover with "Copy value" and "Copy token" buttons. In an output, arrow keys move between tokens and Enter copies. In the restored text, the popover shows which token a value came from; unknown tokens get a wavy underline.
+- **Copy is always plain text.** Copy buttons write the engine's string. A copy handler on the document writes `text/plain` only; when the selection is inside an output, its start and end are mapped back to offsets in the engine's string and that slice is copied, so a hand-made selection is exactly the masked (or restored) text. Toasts name the token ("Copied real value of [HOST_1]") and never contain a value.
+- **Hide values.** For screen sharing, real values are left out of the popover and the mapping table altogether, replaced by a fixed-width bar; copying still works. While it is on, the filter matches tokens and types only.
+- **Mapping table.** Token (click copies it), type, real value, times seen, and a copy-value button (disabled for one-way rows, which read "Not kept (one-way)"). A filter box (`/`) narrows it. At most 500 rows are drawn, with a note to filter, so huge sessions stay fast.
+- **Settings drawer.** A modal `<dialog>` from the right (full width on phones): detector toggles grouped by category with the same swatches, the two keep options, Custom terms, Internal domains, Never mask, and the data-handling note. Esc closes it and focus returns. A summary in the Mask pane ("12 detectors on, 1 custom term, 1 domain") opens it. Changes apply on the next Mask.
+- **Shortcuts.** Ctrl/⌘+Enter runs the current tab; M and R switch tabs, S opens settings, / focuses the filter, ? shows the list, Esc closes. Single letters only act when focus is not in a text field and no dialog is open.
+- **Theme.** Day (paper) and Night (graphite) palettes. The page follows `prefers-color-scheme` until the user picks one with the sun/moon button.
+- **Large pastes.** The first 20,000 tokens are highlighted and the rest of the output is plain text, with a note; Copy masked still copies everything.
 
 ## Tokens
 
@@ -74,12 +108,12 @@ AI replies often reformat tokens. Restore accepts, for any label used in this se
 | Prose | `host 1`, `user 1 of 3` | No: bare forms need the underscore |
 | A different number | `HOST_10` when only `HOST_1` exists | No, reported as not restored |
 
-How it works: one pass matches bracketed forms case-insensitively, a second matches bare upper-case forms. Each resolved piece is held in a private-use placeholder (`U+E002 … U+E003`) until both passes finish, so the second pass can't re-match a token the first pass wrote back, or text inside a restored value. A `\` before `[` only counts as a markdown escape when the `]` is escaped too, so `C:\Users\[USER_1]\AppData` restores to the real path.
+How it works: one pass matches bracketed forms case-insensitively, a second matches bare upper-case forms. Each resolved piece is held in a private-use placeholder (`U+E002 … U+E003`), together with its kind and token, until both passes finish, so the second pass can't re-match a token the first pass wrote back, or text inside a restored value. A `\` before `[` only counts as a markdown escape when the `]` is escaped too, so `C:\Users\[USER_1]\AppData` restores to the real path.
 
-The report under the Restore button lists:
+The report under the restored text (`PM.report()`) lists:
 
 - **Restored**: how many values came back.
-- **Not restored, not from this session**: token-shaped text the session doesn't know, such as a number the AI invented, a token from another tab, or anything left after "Clear mapping".
+- **Not restored, not from this session**: token-shaped text the session doesn't know, such as a number the AI invented, a token from another tab, or anything left after "End session".
 - **One-way, kept as tokens**: secrets, cards and national IDs, written back in their canonical form (`[SECRET_1]`, `[CARD_1:****1111]`).
 
 ## Session store
@@ -89,12 +123,13 @@ S = {
   fwd:  Map<"LABEL|normalised value" | "LABEL|#hash", "[LABEL_n]">   // value -> token
   rev:  Map<"[LABEL_n]", original value>                             // token -> value (reversible only)
   cnt:  { LABEL: n }                                                  // last number used per label
-  rows: [{ token, orig | null }]                                      // mapping table, in creation order
+  rows: [{ token, label, orig | null, seen }]                         // mapping table, in creation order
+  byToken: Map<"[LABEL_n]", row>
   learned: Set<domain>                                                // organisation domains learned from emails
 }
 ```
 
-The store lives only in page memory. Nothing is written to `localStorage`, cookies, IndexedDB or files.
+Each row also counts how often its token was used (`seen`), and `byToken` indexes the rows by token. The store lives only in page memory. Nothing is written to `localStorage`, cookies, IndexedDB or files.
 
 ## Placeholder mechanism
 
@@ -148,7 +183,7 @@ Detectors run in this order. Earlier means more specific: secrets go first so a 
 
 ### Learned domains
 
-When emails are masked whole, the domain of each address is considered sensitive too. Before the detectors run, `learnDomains()` reduces each address's domain to its organisation domain (`mail.corp.example.co.uk` → `example.co.uk`) and adds it to `S.learned`. The hosts detector then treats learned domains like listed internal domains, so the same organisation is masked in `Received:` headers, URLs and FQDNs. Webmail and large shared platforms (`gmail.com`, `outlook.com`, `microsoft.com`, `onmicrosoft.com`…) are never learned. With *Keep email domain* on, nothing is learned. Learned domains last for the session and are forgotten by "Clear mapping".
+When emails are masked whole, the domain of each address is considered sensitive too. Before the detectors run, `learnDomains()` reduces each address's domain to its organisation domain (`mail.corp.example.co.uk` → `example.co.uk`) and adds it to `S.learned`. The hosts detector then treats learned domains like listed internal domains, so the same organisation is masked in `Received:` headers, URLs and FQDNs. Webmail and large shared platforms (`gmail.com`, `outlook.com`, `microsoft.com`, `onmicrosoft.com`…) are never learned. With *Keep email domain* on, nothing is learned. Learned domains last for the session and are forgotten by "End session".
 
 ### Re-masking rules
 
@@ -164,17 +199,21 @@ The last step looks up every whole word in a map of the session's users, NETBIOS
 
 Every pattern is bounded so the work stays roughly linear in the input size. Long lines can't trigger runaway backtracking: email parts have length limits, the gap between a tool name and its flag is capped at 500 characters, and the spaced-path check looks back at most 400 characters. Re-masking is a single pass with a map lookup per word. As a rough guide, 1.5 MB of mixed logs masks in about half a second. The test suite times known worst-case inputs.
 
+Drawing the result is bounded too: at most 20,000 highlighted tokens and 500 mapping rows. Measured in headless Chromium with `tests/ui.js`, a 1.5 MB paste is masked, rendered and painted in about 1.2 s for mixed logs (about 36,000 tokens) and 1.4 s for 1.5 MB of distinct values (about 64,000 tokens, all in the mapping).
+
 ## Privacy guarantees
 
-- **No network.** The CSP meta tag is `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'`, so the page cannot fetch, post, open sockets or load remote resources.
-- **No persistence of values.** The session store lives in memory only. Closing or reloading the tab, or "Clear mapping", discards it.
+- **No network.** The CSP meta tag is `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'none'; base-uri 'none'`, so the page cannot fetch, post, open sockets or load remote resources. `font-src data:` only allows the two fonts embedded in the file.
+- **No persistence of values.** The session store lives in memory only. Closing or reloading the tab, or "End session", discards it.
+- **One stored setting.** The theme choice is the only thing written to storage: one `localStorage` key, `paste-masker-theme`, whose value is only ever the literal `light` or `dark`. It is stored so the page doesn't flash the wrong palette on every open, and it carries no text or value. Every read and write is wrapped in `try`, so a browser that blocks storage still works (the choice then lasts for the tab). The test suite fails on any other storage use: other keys or values, `sessionStorage`, IndexedDB or cookies.
 - **One-way stays one-way.** Secrets are never stored. Only a short hash is kept, to keep their token consistent, and restore can never bring them back.
-- **No HTML injection.** Pasted text and stored values are only ever placed with `textContent` or into text areas.
+- **No HTML injection.** Pasted text and stored values are only ever placed with `textContent` or into text areas. The page has no `innerHTML`-style calls at all; icons are static markup or cloned from a `<template>`.
+- **Plain-text copies.** Every copy from the page is `text/plain` only, and toasts and status lines never contain a real value.
 - **Hardened text fields.** See below.
 
 ### Text fields
 
-Every text area asks the browser and common extensions not to keep or send its contents:
+Every text area, and the mapping filter box, asks the browser and common extensions not to keep or send its contents:
 
 | Attribute | Stops |
 |---|---|
@@ -184,7 +223,7 @@ Every text area asks the browser and common extensions not to keep or send its c
 | `writingsuggestions="false"` | Built-in writing suggestions |
 | `data-gramm`, `data-gramm_editor`, `data-enable-grammarly`, `data-lt-active`, `data-ms-editor` (all `"false"`) | Grammarly, LanguageTool and Microsoft Editor, which send text to their servers |
 
-As a backstop, the four working boxes (raw, masked, reply, restored) are cleared on `pagehide`, when the tab closes or navigates away. The mapping itself is never written anywhere. The CSP also sets `form-action 'none'` and `base-uri 'none'`, which `default-src` doesn't cover, and the page has no forms or links. The test suite fails if any text field lacks one of these attributes.
+As a backstop, the raw text and reply boxes and both rendered outputs are cleared on `pagehide`, when the tab closes or navigates away. The mapping itself is never written anywhere. The CSP also sets `form-action 'none'` and `base-uri 'none'`, which `default-src` doesn't cover, and the page has no forms or links. The test suite fails if any text field lacks one of these attributes.
 
 ## Limits
 
@@ -200,7 +239,6 @@ As a backstop, the four working boxes (raw, masked, reply, restored) are cleared
 
 ## Tests
 
-`tests/` runs the real page script in Node with a small DOM stub (`tests/page.js`), so tests exercise `readCfg`, the buttons, masking and restore exactly as the page does.
-
-- `node tests/run.js` runs the masking cases in `tests/cases.js` (leak and keep checks), restore checks, the built-in sample round trip, and timing on worst-case inputs. Cases marked `todo` are known gaps. They are listed with `--gaps`, and the run fails if one starts passing so its `todo` gets removed.
+- `node tests/run.js` loads only the engine block into a Node VM with no DOM (`tests/page.js`) and drives `PM` directly, with a fresh engine per case. It runs the masking cases in `tests/cases.js` (leak and keep checks), restore checks (including the `unknown` and `oneWay` lists and the report built from them), span positions, mapping rows, session reuse, the built-in sample round trip and timing on worst-case inputs. It also checks the whole file statically: hardened text fields, the CSP, the theme-only storage rule, no other storage, network, HTML injection, links or forms, no page access from the engine, and the `pagehide` handler. Cases marked `todo` are known gaps. They are listed with `--gaps`, and the run fails if one starts passing so its `todo` gets removed.
+- `node tests/ui.js` opens the page in headless Chromium with Playwright and goes through it end to end: the sample, highlighted tokens, plain-text copies equal to the engine's output (including a hand-made selection), hover, click, Shift-click and keyboard on tokens, Hide values, the mapping filter, the settings drawer and a toggle, shortcuts, restore of a reformatted reply and its report, `pagehide`, End session, the theme persisting with only the allowed key, a 390 px phone layout without horizontal scrolling, timing for 1.5 MB inputs, and no console errors or network requests. Without the `playwright` package it prints "skipped" and exits 0. CI installs it after the dependency-free steps.
 - `node tests/public-safety.js` keeps real-looking data out of the repo: unknown GUIDs, non-example email domains, public IPs outside documentation ranges, and terms from a private, git-ignored `.public-safety-denylist`.

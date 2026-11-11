@@ -1,54 +1,47 @@
-// Loads paste-masker.html's script into a Node VM with a small DOM stub, so tests drive the real page
-// code (readCfg, the buttons, maskText, restoreText) without a browser or any dependencies.
+// Loads the engine block of paste-masker.html (<script id="engine">) into a Node VM with no DOM at all, and
+// drives it through PM, the same interface the page uses. No browser and no dependencies.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const HTML = path.join(__dirname, '..', 'paste-masker.html');
-const GROUPS = ['secrets', 'cards', 'bvn', 'account', 'phones', 'emails', 'users', 'hosts', 'guids', 'sids', 'macs', 'ips'];
+const HTML_PATH = path.join(__dirname, '..', 'paste-masker.html');
+const html = () => fs.readFileSync(HTML_PATH, 'utf8');
 
+function scriptBlock(id){
+  const m = html().match(new RegExp(`<script id="${id}">([\\s\\S]*?)</script>`));
+  if (!m) throw new Error(`no <script id="${id}"> block in paste-masker.html`);
+  return m[1];
+}
+
+// A fresh engine. opts: { off: [group], keepEmailDomain, keepPublicIp, terms: [line], domains: [line], allow: [line] }
+function loadEngine(opts = {}){
+  const ctx = vm.createContext({});   // no document, window or navigator: the engine must not need them
+  vm.runInContext(scriptBlock('engine'), ctx, { filename: 'paste-masker.html#engine' });
+  const PM = vm.runInContext('PM', ctx);
+  const on = {};
+  for (const g of opts.off || []) on[g] = false;
+  PM.configure({ on, keepEmailDomain: !!opts.keepEmailDomain, keepPublicIp: !!opts.keepPublicIp,
+    terms: opts.terms || [], domains: opts.domains || [], allow: opts.allow || [] });
+  return PM;
+}
+
+// The same engine with string-in, string-out helpers for the tests.
 function loadPage(opts = {}){
-  const html = fs.readFileSync(HTML, 'utf8');
-  const script = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
-  const els = {};
-  const el = id => els[id] || (els[id] = {
-    id, value: '', checked: false, textContent: '', className: '', dataset: {}, handlers: {},
-    addEventListener(type, fn){ this.handlers[type] = fn; },
-    appendChild(){}, append(){}, setAttribute(){}, removeAttribute(){}, select(){},
-  });
-  const off = new Set(opts.off || []);
-  const boxes = GROUPS.map(g => ({ dataset: { g }, checked: !off.has(g) }));
-  const winHandlers = {};
-  const ctx = {
-    console, setTimeout, navigator: {}, confirm: () => true,
-    addEventListener(type, fn){ winHandlers[type] = fn; },
-    document: {
-      getElementById: el,
-      querySelectorAll: () => boxes,
-      createElement: () => el('tmp' + Math.random()),
-      execCommand(){},
-    },
-  };
-  vm.createContext(ctx);
-  vm.runInContext(script, ctx, { filename: 'paste-masker.html' });
-
-  el('domains').value = (opts.domains || []).join('\n');
-  el('terms').value = (opts.terms || []).join('\n');
-  el('allow').value = (opts.allow || []).join('\n');
-  el('keepEmailDomain').checked = !!opts.keepEmailDomain;
-  el('keepPublicIp').checked = !!opts.keepPublicIp;
-
+  const PM = loadEngine(opts);
+  let last = null;
   return {
-    mask(text){ el('input').value = text; el('maskBtn').handlers.click(); return el('output').value; },
-    restore(text){ el('reply').value = text; el('restoreBtn').handlers.click(); return el('restored').value; },
-    clear(){ el('clearMapBtn').handlers.click(); },
-    sample(){ el('sampleBtn').handlers.click(); return { input: el('input').value, output: el('output').value }; },
-    stats(){ return el('stats').textContent; },
-    restoreStats(){ return el('restoreStats').textContent; },
-    pagehide(){ winHandlers.pagehide && winHandlers.pagehide(); },
-    field(id){ return el(id).value; },
+    PM,
+    mask: text => PM.mask(text).text,
+    restore(text){ last = PM.restore(text); return last.text; },
+    lastRestore: () => last,
+    clear: () => PM.clear(),
+    // What "Load sample" does: the sample's terms and domains, then Mask.
+    sample(){
+      PM.configure({ terms: PM.sample.terms, domains: PM.sample.domains });
+      return { input: PM.sample.text, output: PM.mask(PM.sample.text).text };
+    },
   };
 }
 
-module.exports = { loadPage, GROUPS };
+module.exports = { loadEngine, loadPage, scriptBlock, HTML_PATH };

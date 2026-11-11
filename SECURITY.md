@@ -15,7 +15,7 @@ Useful reports include:
 ## What the tool guarantees
 
 - The page makes no network requests. A Content Security Policy blocks them.
-- Real values are held in memory for the current tab only and are never written to storage.
+- Real values are held in memory for the current tab only and are never written to storage. The only stored setting is the theme choice, the word `light` or `dark`.
 - One-way values (secrets, card numbers, national IDs) are never stored and can't be restored.
 - Text fields opt out of form history, session restore, spell-check, translation and common grammar extensions.
 
