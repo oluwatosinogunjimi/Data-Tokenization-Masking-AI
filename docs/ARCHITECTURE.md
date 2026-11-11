@@ -109,6 +109,7 @@ AI replies often reformat tokens. Restore accepts, for any label used in this se
 |---|---|---|
 | As written, in backticks or bold | `[HOST_1]`, `` `[HOST_1]` ``, `**[HOST_1]**` | Yes |
 | Bare | `HOST_1` | Yes |
+| Bare with hyphens, Title or upper case | `HOST-1`, `Host_1`, `PRIVATE-IP-1`, `Person-Email-1.2` | Yes |
 | Any case, in brackets | `[host_1]`, `[Host_1]` | Yes |
 | Markdown-escaped | `\[HOST\_1\]`, `[HOST\_1]`, `HOST\_1` | Yes |
 | Space, hyphen, non-breaking space or padding | `[HOST 1]`, `[HOST-1]`, `[ HOST_1 ]`, `[private ip 1]` | Yes |
@@ -116,7 +117,9 @@ AI replies often reformat tokens. Restore accepts, for any label used in this se
 | Plural or possessive | `HOST_1s`, `HOST_1's` | Yes (the `s` stays) |
 | Invisible characters inside | zero-width space or joiner between label and number | Yes |
 | Sub-indexed, any of the forms above | `[PERSON_1.2]`, `[person 1.2]`, `PERSON_USER_1.2` | Yes, to that exact surface form |
-| Bare lowercase | `host_1` | No: more likely a code identifier |
+| Bare lowercase | `host_1`, `host-1` | No: more likely a code identifier |
+| Inside a longer word | `pre-HOST-1`, `HOST-1a`, `HOST-1_x` | No |
+| A label this session never used | `WEB-1` | No: only labels in the mapping are matched |
 | Prose | `host 1`, `user 1 of 3` | No: bare forms need the underscore |
 | A different number | `HOST_10` when only `HOST_1` exists | No, reported as not restored |
 
@@ -139,17 +142,30 @@ The **entity list is the custom-terms list**: one `term | TYPE` per line, edited
 | `[PERSON_n]` | The full name and its variants: `Jane Doe`, `jane doe`, `JANE DOE`, `Doe, Jane`, `DOE, Jane`, `J. Doe`, `J Doe`, `Jane A. Doe`, `Jane Alice Doe` | Any case |
 | `[PERSON_FIRST_n]` | `Jane` alone | Capitalised only (`Jane`, `JANE`; not `jane`), whole word, at least 2 letters |
 | `[PERSON_LAST_n]` | `Doe` alone | Same rules as the first name |
-| `[PERSON_USER_n]` | Username forms `jane.doe`, `janedoe`, `jane_doe`, `jane-doe`, `jdoe`, `j.doe`, `doej`, `doe.jane`, `janed` | Any case, whole identifier; forms shorter than 4 characters are skipped |
+| `[PERSON_USER_n]` | Username forms `jane.doe`, `janedoe`, `jane_doe`, `jane-doe`, `jdoe`, `j.doe`, `doej`, `doe.jane`, `janed`; also a separated form inside a longer identifier (`jane_doe_admin` → `[PERSON_USER_n]_admin`, not `jane_doe2`) | Any case, whole identifier; forms shorter than 4 characters are skipped |
+| `[PERSON_EMAIL_n]` | An email whose name part is a username form (`jane.doe@example.com`, `jdoe@example.org`) | Any case. With *Keep email domain* on: `[PERSON_USER_n]@example.com` |
 
-Other entity types match the whole term only, in any case and spacing; they get no part or username forms.
+For other entity types (`Contoso | ORG`, `Nexus Grid | PROJECT`, `fs01 | HOST`):
+
+| Token | Form | Matched |
+|---|---|---|
+| `[ORG_n]` | The whole term, any case and spacing | Whole words |
+| `[ORG_n.k]` | **Short forms**: each distinctive capitalised word alone (`Montagu` for `Montagu Evans`). Generic words (`Ltd`, `Group`, `Bank`, `Services`, `Grid`, `Project`…) never stand alone | Capitalised only, whole word |
+| `[PROJECT_n.k]` | **Identifier forms**: the words joined by `_`, `-`, `.` or nothing (`Nexus_Grid`, `nexus-grid`, `NexusGrid`), alone or as part of a longer identifier joined with `_` or `-`; only the entity part is replaced (`Nexus_Grid_prod01` → `[PROJECT_1.2]_prod01`). The joined-up form needs at least 6 characters; matches inside long hexadecimal runs (hashes) are skipped | Any case |
+| `[ORG_NETBIOS_n]` | A NetBIOS domain equal to the term (`CONTOSO\amy` → `[ORG_NETBIOS_1]\[USER_1]`) | Any case |
+| `[ORG_DOMAIN_n]` | A domain whose organisation label is the term, listed or not (`contoso.com`, `contoso.co.uk`); hosts under it stay `HOST` tokens | Any case |
+| `[ORG_TENANT_n]` | A Microsoft 365 tenant name equal to the term (`contoso.onmicrosoft.com`) | Any case |
+| `[HOST_n.k]` | For `HOST` entities: the host with any domain after it (`fs01.corp.example.local`, `fs01.local`), `\\fs01`, the machine account `FS01$`; a file name (`fs01.log`) keeps its extension visible | Any case |
+
+The composite labels follow the grouping scheme (`ROOT_TYPE`), so a domain or NetBIOS name that is not a listed entity keeps its own label (`DOMAIN`, `NETBIOS`) and numbering, and never takes an entity's number.
 
 **Sub-index, for exact restore.** Within one label and number, the first surface string seen gets `[LABEL_n]` and each further distinct surface string gets `[LABEL_n.2]`, `[LABEL_n.3]`…: `Jane Doe` → `[PERSON_1]`, `Doe, Jane` → `[PERSON_1.2]`, `JANE DOE` → `[PERSON_1.3]`; `jdoe` → `[PERSON_USER_1]`, `jane.doe` → `[PERSON_USER_1.2]`; `Acme Ltd` → `[ORG_1]`, `ACME LTD` → `[ORG_1.2]`. Every token restores to exactly its own surface string, so a reply restores to the original text character for character.
 
 **Numbering.** An entity's number is allocated once, on first use of any of its forms, so `Jane` seen before `Jane Doe` still gives `[PERSON_FIRST_1]` and later `[PERSON_1]`. Person numbers share the `PERSON` counter with the display-name, title and mail-name detectors, so numbers never collide; a plain token already made for the same full value keeps its number and becomes the entity's first surface form.
 
-**Routing.** `mk()` asks `routeEntity()` first, so entity forms found by other detectors get entity tokens: `CORP\jdoe` → `[NETBIOS_1]\[PERSON_USER_1]` (the NETBIOS part is still masked as NETBIOS), `C:\Users\jdoe`, `net user jdoe`, `Account Name: jdoe`, `Display Name: Jane Doe` → `[PERSON_1]`, `Mrs Doe` → `Mrs [PERSON_LAST_1]`, `"Jane Doe" <…>`, host fields for `HOST` entities, and the name part of an email when *Keep email domain* is on (`jane.doe@contoso.com` → `[PERSON_USER_1]@contoso.com`). Whole emails, with the option off, stay `[EMAIL_n]`.
+**Routing.** `mk()` asks `routeEntity()` first, so entity forms found by other detectors get entity tokens: `CORP\jdoe` → `[NETBIOS_1]\[PERSON_USER_1]` (the NETBIOS part is still masked as NETBIOS), `C:\Users\jdoe`, `net user jdoe`, `Account Name: jdoe`, `Display Name: Jane Doe` → `[PERSON_1]`, `Mrs Doe` → `Mrs [PERSON_LAST_1]`, `"Jane Doe" <…>`, host fields for `HOST` entities, a listed person's email (`[PERSON_EMAIL_1]`), or its name part when *Keep email domain* is on (`jane.doe@contoso.com` → `[PERSON_USER_1]@contoso.com`), a listed host's FQDN, and a listed organisation's NetBIOS name, domain or tenant.
 
-**Where the entity passes run.** Listed people's full-name forms run just before the username detectors (so `Dr Jane A. Doe` stays one name). The rest run where custom terms always did: other entity types, then URLs, then username forms, then a first or last name alone. In a URL, a host label, path segment, query key or value, fragment or user name that is wholly an entity form is masked, percent- or plus-encoded too (`https://jdoe.example.com/u/jdoe?owner=Jane%20Doe#jdoe` → `https://[PERSON_USER_1].example.com/u/[PERSON_USER_1]?owner=[PERSON_1]#[PERSON_USER_1]`); the token stands for the text exactly as written in the URL. Outside URLs, a username form is masked as the first label of a hostname (`jdoe.corp.example.com`, `jdoe.corp`), as a whole path segment (`\\fs01\jdoe\x`, `"/srv/jdoe/data"`) and as a UNC host (`\\jdoe\share`); a capitalised first or last name also counts as a whole path segment. Boundaries keep matches out of longer words and identifiers (`Doesn't`, `Doe123`, `Mary-Jane`, `x_jdoe`, `jdoe2`, `/xjdoe/`), file names (`jdoe.txt`, `jdoe.png`, `jdoe.tar.gz`), emails (whole emails stay `[EMAIL_n]`), hashes and existing tokens. The re-masking step skips entity tokens, since the entity passes already find every form.
+**Where the entity passes run.** Listed people's full-name forms run just before the username detectors (so `Dr Jane A. Doe` stays one name). The rest run where custom terms always did: organisation domains, other entity types' whole terms, then URLs, then username forms, then identifier forms, then short forms, then a first or last name alone. In a URL, a host label, path segment, query key or value, fragment or user name that is wholly an entity form is masked, percent- or plus-encoded too (`https://jdoe.example.com/u/jdoe?owner=Jane%20Doe#jdoe` → `https://[PERSON_USER_1].example.com/u/[PERSON_USER_1]?owner=[PERSON_1]#[PERSON_USER_1]`); the token stands for the text exactly as written in the URL. Outside URLs, a username form is masked as the first label of a hostname (`jdoe.corp.example.com`, `jdoe.corp`), as a whole path segment (`\\fs01\jdoe\x`, `"/srv/jdoe/data"`) and as a UNC host (`\\jdoe\share`); a capitalised first or last name also counts as a whole path segment. Boundaries keep matches out of longer words and identifiers (`Doesn't`, `Doe123`, `Mary-Jane`, `x_jdoe`, `jdoe2`, `/xjdoe/`), file names (`jdoe.txt`, `jdoe.png`, `jdoe.tar.gz`), emails (handled whole by the email detector), hashes and existing tokens. The re-masking step skips entity tokens, since the entity passes already find every form.
 
 ## Grouping
 
@@ -220,13 +236,13 @@ Detectors run in this order. Earlier means more specific: secrets go first so a 
 | 8 | Listed people (always on) | `PERSON` | Full-name forms of `PERSON` entities, before the account and name fields | Reversible |
 | 9 | Usernames and names | `USER`, `NETBIOS` | `C:\Users\NAME`, `/home/NAME`, `/Users/NAME`, `DOMAIN\NAME` (skips well-known domains, file names and folders inside spaced paths). `DOMAIN\NAME$` is a machine account and becomes `HOST` | Reversible |
 | | | `USER` | Usernames in commands: `net user NAME`, `net localgroup … NAME /add`, `/user:`, `/u:`, `/ru`, `--user`, `-UserName`, and `-u`/`-U`/`-l` for tools where it means user (psexec, nxc, sqlcmd, mysql, psql, smbclient, hydra and similar), `curl -u NAME:`, `domain/NAME:…@host` | Reversible |
-| | | `USER`, `NETBIOS`, `ORG_DOMAIN` | Key/value fields in Windows events, JSON, CEF and key=value logs: account keys (`Account Name`, `*AccountName`, `*UserName`, `SAM Account Name`, `suser`, `duser`, `user`…) and domain keys (`Account Domain`, `*DomainName`…) | Reversible |
+| | | `USER`, `NETBIOS`, `DOMAIN` | Key/value fields in Windows events, JSON, CEF and key=value logs: account keys (`Account Name`, `*AccountName`, `*UserName`, `SAM Account Name`, `suser`, `duser`, `user`…) and domain keys (`Account Domain`, `*DomainName`…) | Reversible |
 | | | `USER` | Auth logs: `Accepted/Failed … for NAME`, `Invalid user NAME`, `session opened for user NAME`, `sudo: NAME :` | Reversible |
 | | | `PERSON` | Display-name fields (`Display Name`, `DisplayName`, `UserDisplayName`, `givenName`…), a name after a title (`Mr`, `Mrs`, `Dr`, `Prof`, `Engr`…), and a mail display name before a masked address (`"Jane Doe" <…>`) | Reversible |
-| 10 | Hostnames and cloud resource names | `HOST`, `ORG_DOMAIN` | Anything under a listed internal domain or a domain learned from email addresses; `\\host\share`; `DESKTOP-`, `LAPTOP-`, `WIN-`, `SRV-` names | Reversible |
+| 10 | Hostnames and cloud resource names | `HOST`, `DOMAIN` | Anything under a listed internal domain or a domain learned from email addresses; `\\host\share`; `DESKTOP-`, `LAPTOP-`, `WIN-`, `SRV-` names | Reversible |
 | | | `HOST` | Host fields (`*DeviceName`, `*ComputerName`, `*HostName`, `Workstation Name`, `Computer`, `devname`, `shost`, `dhost`, `host=`…), the host in a syslog line, and hostname-shaped words after `device`, `host`, `computer`, `server`, `workstation`. A dotted name in a destination-style field (`DestinationHostName`, `dhost`, `host=`) is often a public site, so it is masked only under a known domain or a private suffix (`.local`, `.lan`, `.internal`, `.corp`) | Reversible |
 | | | `AZ_STORAGE`, `AZ_SERVICEBUS`, `AZ_SQL`, `AZ_KEYVAULT`, `AZ_APP`, `AZ_REGISTRY`, `AZ_COSMOS`, `TENANT` | The resource name before a known Azure suffix, and `AccountName=` in connection strings | Reversible |
-| 11 | Entities (always on) | Your label (`ORG`, `HOST`, `PROJECT`, `OTHER`…), `PERSON_USER`, `PERSON_FIRST`, `PERSON_LAST`, or `TERM` | Other entity types' whole terms; then listed people's username forms, then a capitalised first or last name alone. See [Entities](#entities) | Reversible |
+| 11 | Entities (always on) | Your label (`ORG`, `HOST`, `PROJECT`, `OTHER`…), `ORG_DOMAIN`, `PERSON_USER`, `PERSON_FIRST`, `PERSON_LAST`, or `TERM` | Organisation domains; other entity types' whole terms; then listed people's username forms, identifier forms, short forms, then a capitalised first or last name alone. See [Entities](#entities) | Reversible |
 | 12 | Domain SIDs | `DOMAIN_SID` | The domain part of `S-1-5-21-a-b-c`, keeping the RID | Reversible |
 | 13 | MAC addresses | `MAC` | `aa:bb:cc:dd:ee:ff` / `aa-bb-…` (skips all-zero and broadcast) | Reversible |
 | 14 | IP addresses | `PRIVATE_IP`, `PUBLIC_IP` | IPv4 (including defanged `[.]` and `(.)`) and IPv6; skips loopback, `0.0.0.0` and broadcast | Reversible |
@@ -287,6 +303,7 @@ As a backstop, the raw text and reply boxes and both rendered outputs are cleare
 - **The CSP doesn't cover everything.** It doesn't stop browser extensions from reading the page, other apps from reading the clipboard, or a user from following a link. The page contains no links for that reason.
 - **Opt-outs are requests.** The field attributes are honoured by browsers and the named extensions, but an extension can ignore them. Use a browser profile without such extensions for sensitive text.
 - **Listed names match capitalised words.** A first or last name on its own is masked whenever it appears capitalised, so a listed person called May, Will or Mark is also masked as the capitalised word at the start of a sentence ("Will this work?"). Lowercase uses (`will`, `grace period`) are left alone. Full-name variants with an initial (`J. Doe`) can also catch a different person with the same initial and surname.
+- **Short and identifier forms can over-match.** A distinctive word of an organisation's name is masked wherever it appears capitalised (a person or place with the same name too), and an identifier that contains the joined-up term is partly masked.
 - **Entity tokens reveal more structure.** Linked tokens show that `[PERSON_FIRST_1]` and `[PERSON_USER_1]` are the same person, and sub-indexes show how many spellings were seen.
 - **Cues can be wrong.** Field and keyword cues assume the value after `user=` is a user and the value after `Display Name:` is a person. An app name in a `DisplayName` field becomes a `PERSON` token, and an ordinary word that happens to equal a known username elsewhere is re-masked.
 - **Learned domains hide destinations.** If the text contains an address at a domain, every URL and host under that domain is masked too. Turn on *Keep email domain* when those destinations matter.

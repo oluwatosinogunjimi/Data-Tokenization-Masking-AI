@@ -669,8 +669,8 @@ function mk(label, value, o = {}){
   const key = label + '|' + (o.oneWay ? '#' + fnv(norm) : norm);
   let t = S.fwd.get(key);
   if (!t){
-    S.cnt[label] = (S.cnt[label] || 0) + 1;
-    t = '[' + label + '_' + S.cnt[label] + ']';
+    // Skip numbers an entity or a grouping already took under this label.
+    do { S.cnt[label] = (S.cnt[label] || 0) + 1; t = '[' + label + '_' + S.cnt[label] + ']'; } while (S.byToken.has(t));
     S.fwd.set(key, t);
     const row = { token: t, label, type: label, orig: o.oneWay ? null : value, seen: 0 };
     S.rows.push(row); S.byToken.set(t, row);
@@ -722,8 +722,13 @@ function buildEntities(){
     const words = term.split(/\s+/);
     const e = { key, term, label, norm: key.slice(key.indexOf('|') + 1), person: label === 'PERSON' };
     if (!e.person){
-      // Other entities match the whole term only, whatever its case or spacing.
-      e.fullRe = new RegExp('(?<![A-Za-z0-9])' + words.map(esc).join('[ \\t]+') + '(?![A-Za-z0-9])', 'gi');
+      // Other entities match the whole term, whatever its case or spacing. A host may carry a domain after it.
+      const hostSfx = label === 'HOST' ? '((?:\\.[A-Za-z0-9-]+)+)?' : '';
+      e.fullRe = new RegExp('(?<![A-Za-z0-9])' + words.map(esc).join('[ \\t]+') + hostSfx + '(?![A-Za-z0-9])', 'gi');
+      // The organisation's own domains, listed or not: contoso.com, contoso.co.uk, mail.contoso.com (a host).
+      const cmp = words.map(w => w.replace(/[^A-Za-z0-9-]/g, '')).join('');
+      if (label !== 'HOST' && cmp.length >= 3)
+        e.domRe = new RegExp(`(?<![A-Za-z0-9.@-])((?:[A-Za-z0-9-]+\\.)*)(${esc(cmp)})(\\.[A-Za-z]{2,24}(?:\\.[A-Za-z]{2})?)(?![A-Za-z0-9-]|\\.[A-Za-z0-9])`, 'gi');
     } else if (words.length === 1){
       // A one-word name is its own full name, and like a first name it only counts when capitalised.
       e.single = true;
@@ -751,10 +756,55 @@ function buildEntities(){
         if (u.length) e.userRe = new RegExp(`${USER_B}(?:${u.join('|')})${USER_A}`, 'giu');
       }
     }
+    // Compact form, for NetBIOS names, domains and tenants: "Nexus Grid" -> nexusgrid.
+    const parts = words.map(w => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean);
+    e.compact = parts.join('').toLowerCase();
+    if (!e.person && words.length > 1){
+      // Short forms: each distinctive capitalised word on its own ("Montagu" for "Montagu Evans").
+      const shorts = [...new Set(words.filter(w => isCap(w) && w.replace(/[^\p{L}]/gu, '').length >= 3)
+        .map(w => w.replace(/[.,]+$/, '')).filter(w => !GENERIC_WORDS.has(w.toLowerCase())))];
+      if (shorts.length){
+        e.shorts = new Set(shorts.map(w => w.toLowerCase()));
+        e.shortRe = new RegExp(`${PART_B}(?:${shorts.map(ci).join('|')})${PART_A}`, 'gu');
+      }
+    }
+    if (parts.length > 1){
+      // Identifier forms: Nexus_Grid, nexus-grid, nexus.grid, NexusGrid, alone or as part of a longer identifier
+      // joined with _ or - (Nexus_Grid_prod01, prod-nexusgrid). Without a separator only when long enough not to be noise.
+      // People already have username forms; for them only a separated form inside a longer identifier is new
+      // (jane_doe_admin), and a trailing digit makes it a different name (jane_doe2).
+      const body = parts.map(esc).join(!e.person && e.compact.length >= 6 ? '[_.-]?' : '[_.-]');
+      const after = e.person ? `(?![\\p{L}\\p{N}${PUA_C}@]|\\.[\\p{L}\\p{N}])` : `(?![\\p{L}${PUA_C}@]|\\.[\\p{L}\\p{N}])`;
+      e.identRe = new RegExp(`(?<![\\p{L}\\p{N}${PUA_C}@.])(?:${body})${after}`, 'giu');
+      e.identWhole = new RegExp(`^(?:${body})$`, 'iu');
+    }
     list.push(e);
   }
   ENT = { list, persons: list.filter(e => e.person && !e.single) };
 }
+// Words too generic to stand for an organisation or project on their own.
+const GENERIC_WORDS = new Set(['ltd','limited','llc','llp','inc','corp','corporation','company','co','group','holdings','holding',
+  'bank','services','service','solutions','systems','system','technologies','technology','tech','global','international',
+  'partners','partner','capital','trust','plc','gmbh','sa','ag','nv','bv','the','and','of','for','project','projects','team',
+  'platform','network','networks','cloud','data','digital','energy','health','healthcare','grid','labs','lab','consulting',
+  'management','media','software','security','financial','finance','insurance','foundation','institute','university',
+  'school','college','council','agency','department','ministry','office','north','south','east','west','central','national',
+  'united','new','first','one','power','water','gas','oil','air','general','industries','industrial','enterprises','ventures',
+  'investments','associates','agency','store','stores','shop','retail','motors','pharma','medical','care','home','homes',
+  'property','properties','estates','logistics','transport','airlines','telecom','communications','mobile','online','web',
+  'app','apps','api','dev','prod','test','staging','portal','hub','server','client','customer','user','admin','support']);
+// ".com", ".co.uk", ".local": a domain ending, not a file extension (".png", ".log").
+const isDomainTail = tld => {
+  const last = tld.slice(tld.lastIndexOf('.') + 1);
+  return !FILE_LIKE.test(last) && (!FILE_EXT.test('.' + last) || /^com$/i.test(last));
+};
+// A match inside a long hexadecimal run is part of a hash or key, not a name.
+const inHex = (all, off, len) => {
+  let a = off, b = off + len;
+  while (a > 0 && /[0-9a-f]/i.test(all[a - 1])) a--;
+  while (b < all.length && /[0-9a-f]/i.test(all[b])) b++;
+  return b - a >= 16 && /^[0-9a-f]+$/i.test(all.slice(a, b));
+};
 
 // Which entity form a whole string is, if any: { e, part } or null.
 function formOf(v){
@@ -767,6 +817,10 @@ function formOf(v){
     if (e.users && e.users.has(low)) return { e, part: 'USER' };
     if (isCap(v) && low === e.first) return { e, part: 'FIRST' };
     if (isCap(v) && low === e.last) return { e, part: 'LAST' };
+  }
+  for (const e of ENT.list){
+    if (e.identWhole && e.identWhole.test(v)) return { e, part: e.person ? 'USER' : '' };
+    if (e.shorts && isCap(v) && e.shorts.has(low)) return { e, part: '' };
   }
   return null;
 }
@@ -877,8 +931,24 @@ function routeEntity(label, value){
       if ((label === 'PERSON' || label === 'USER') && low === e.norm && isCap(value)) return entityTok(e, '', value);
     } else if (label === e.label && (low === e.norm || (e.anchored && e.anchored.test(value)))) return entityTok(e, '', value);
   }
-  if (label === 'HOST'){   // a host named like a listed person's username: \\jdoe\share
+  if (label === 'HOST'){
+    // A listed host's FQDN or machine name: fs01.corp.example.com is a spelling of the host entity "fs01".
+    const first = low.split('.')[0];
+    for (const e of ENT.list) if (!e.person && e.label === 'HOST' && (first === e.norm || first === e.compact)) return entityTok(e, '', value);
+    // A host named like a listed person's username: \\jdoe\share
     for (const e of ENT.persons) if (e.users && e.users.has(low)) return entityTok(e, 'USER', value);
+    return null;
+  }
+  if (label === 'EMAIL'){
+    // An address whose name part is a listed person's username form: jane.doe@example.com -> [PERSON_EMAIL_1].
+    const local = low.slice(0, low.lastIndexOf('@'));
+    for (const e of ENT.persons) if ((e.users && e.users.has(local)) || (e.identWhole && e.identWhole.test(local))) return entityTok(e, 'EMAIL', value);
+    return null;
+  }
+  // A listed organisation's NetBIOS name, domain or tenant: CONTOSO\..., contoso.com, contoso.onmicrosoft.com.
+  if (label === 'NETBIOS' || label === 'DOMAIN' || label === 'TENANT'){
+    const key = label === 'DOMAIN' ? orgDomain(low).split('.')[0] : low;
+    for (const e of ENT.list) if (!e.person && e.label !== 'HOST' && (key === e.compact || key === e.norm)) return entityTok(e, label, value);
     return null;
   }
   if (label !== 'PERSON' && label !== 'USER') return null;
@@ -1016,6 +1086,8 @@ const CMD_USERS = [
   new RegExp(`(\\b(?:curl|wget)(?:\\.exe)?\\b[^\\n]{0,500}?[ \\t](?:-u|--user|--http-user)(?:[ \\t]+|=)["']?)(${ACCT})(?=:)`, 'gi'),
   new RegExp(`((?<![\\w./:-])[A-Za-z0-9.-]+/)(${ACCT})(?=:\\uE000)`, 'g'),
 ];
+// "jdoe)." -> ["jdoe", ")."]: trailing punctuation is never part of a username.
+const splitTail = u => { const m = u.match(/^(.*?)([.,;:!?)\]}>'"’]*)$/); return [m[1], m[2]]; };
 function userTok(u){
   if (u.length < 2 || SKIP_USERS.has(u.toLowerCase()) || NOT_A_NAME.test(u) || /^\d+$/.test(u) || FILE_EXT.test(u)) return u;
   if (u.endsWith('$')) return SKIP_USERS.has(u.slice(0, -1).toLowerCase()) ? u : mk('HOST', u.slice(0, -1)) + '$';   // machine account
@@ -1116,10 +1188,11 @@ const DETECTORS = [
       return t;
     } },
   { g: 'users', run: t => t
-    .replace(/([A-Za-z]:\\(?:Users|Documents and Settings)\\)([^\\\/\s"'<>|:\uE000-\uE0FF]+)/gi,
-      (m, p, u) => SKIP_USERS.has(u.toLowerCase()) ? m : p + mk('USER', u))
-    .replace(/(^|[\s"'=(])(\/(?:home|Users)\/)([^\/\s"'<>|:\uE000-\uE0FF]+)/gm,
-      (m, pre, p, u) => SKIP_USERS.has(u.toLowerCase()) ? m : pre + p + mk('USER', u))
+    // Sentence punctuation after the name stays outside the token: "C:\Users\jdoe," "(/home/jdoe)" "/home/jdoe."
+    .replace(/([A-Za-z]:\\(?:Users|Documents and Settings)\\)([^\\\/\s"'<>|:,;\uE000-\uE0FF]+)/gi,
+      (m, p, u) => { const [name, tail] = splitTail(u); return !name || SKIP_USERS.has(name.toLowerCase()) ? m : p + mk('USER', name) + tail; })
+    .replace(/(^|[\s"'=(])(\/(?:home|Users)\/)([^\/\s"'<>|:,;\uE000-\uE0FF]+)/gm,
+      (m, pre, p, u) => { const [name, tail] = splitTail(u); return !name || SKIP_USERS.has(name.toLowerCase()) ? m : pre + p + mk('USER', name) + tail; })
     .replace(/(^|[\s"'=(,;\[:])([A-Za-z][A-Za-z0-9-]{0,14})\\([A-Za-z0-9._$-]{0,63}[A-Za-z0-9_$])(?![\\\w$-])/gm, (m, pre, dom, u, off, all) => {
       if (WELL_KNOWN_DOMAINS.has(dom.toLowerCase())) return m;
       // A file name (Temp\x.ps1, Office16\WINWORD.EXE) or a folder inside a spaced path is not DOMAIN\user.
@@ -1129,7 +1202,7 @@ const DETECTORS = [
     .replace(/[\s\S]*/, t2 => CMD_USERS.reduce((acc, re) => acc.replace(re, (m, pre, u) => pre + userTok(u)), t2))
     // AccountName=... followed by ";" is an Azure connection string; the hosts group handles that one.
     .replace(USER_FIELD, (m, k, u, off, all) => /accountname/i.test(k) && all[off + m.length] === ';' ? m : k + userTok(u))
-    .replace(DOMAIN_FIELD, (m, k, d) => WELL_KNOWN_DOMAINS.has(d.toLowerCase()) || NOT_A_NAME.test(d) ? m : k + mk(d.includes('.') ? 'ORG_DOMAIN' : 'NETBIOS', d))
+    .replace(DOMAIN_FIELD, (m, k, d) => WELL_KNOWN_DOMAINS.has(d.toLowerCase()) || NOT_A_NAME.test(d) ? m : k + mk(d.includes('.') ? 'DOMAIN' : 'NETBIOS', d))
     .replace(AUTH_USER, (m, k, u) => k + userTok(u))
     .replace(NAME_FIELD, (m, k, n) => k + mk('PERSON', n))
     .replace(HONORIFIC, (m, h, n) => h + mk('PERSON', n))
@@ -1139,7 +1212,7 @@ const DETECTORS = [
       const doms = [...new Set([...CFG.domains, ...S.learned])].sort((a, b) => b.length - a.length);
       for (const s of doms){
         const re = new RegExp('(?<![A-Za-z0-9.-])((?:[A-Za-z0-9-]+\\.)*)(' + esc(s) + ')(?![A-Za-z0-9-]|\\.[A-Za-z0-9])', 'gi');
-        t = t.replace(re, (m, sub) => sub ? mk('HOST', m) : mk('ORG_DOMAIN', m));
+        t = t.replace(re, (m, sub) => sub ? mk('HOST', m) : mk('DOMAIN', m));
       }
       t = t.replace(HOST_FIELD, (m, k, h) => {
         // A dotted name in a destination-style field is often a public site: mask it only if it looks internal.
@@ -1161,9 +1234,21 @@ const DETECTORS = [
   // The rest of the entities (the custom-terms list), always on: other entity types, then usernames, then a first or
   // last name alone, with URL parts checked first. Forms that other detectors found first already carry the entity's token.
   { g: 'terms', always: true, run: t => {
-      for (const e of ENT.list) if (!e.person) t = t.replace(e.fullRe, m => entityTok(e, '', m));
+      // A listed organisation's own domain anywhere (contoso.co.uk), and hosts under it, before the bare name.
+      for (const e of ENT.list) if (e.domRe) t = t.replace(e.domRe, (m, sub, name, tld) =>
+        isDomainTail(tld) ? (sub ? mk('HOST', m) : mk('DOMAIN', m)) : m);
+      for (const e of ENT.list) if (!e.person) t = t.replace(e.fullRe, (m, sfx, off, all) => {
+        if (typeof sfx !== 'string') return entityTok(e, '', m);
+        // A listed host with a domain after it (fs01.local, fs01.corp.example.com) is one spelling of that host;
+        // a file name (fs01.log) is not, so only the host part is masked there.
+        const name = m.slice(0, m.length - sfx.length);
+        return userFormEnds(all, off + name.length) ? entityTok(e, '', m) : entityTok(e, '', name) + sfx;
+      });
       if (ENT.list.length) t = t.replace(URL_RE, maskUrl);
       for (const e of ENT.persons) if (e.userRe) t = t.replace(e.userRe, (m, off, all) => userFormEnds(all, off + m.length) ? entityTok(e, 'USER', m) : m);
+      // Identifier forms (Nexus_Grid_prod01): only the entity's part becomes a token, the rest of the identifier stays.
+      for (const e of ENT.list) if (e.identRe) t = t.replace(e.identRe, (m, off, all) => inHex(all, off, m.length) ? m : entityTok(e, e.person ? 'USER' : '', m));
+      for (const e of ENT.list) if (e.shortRe) t = t.replace(e.shortRe, m => isCap(m) ? entityTok(e, '', m) : m);
       for (const e of ENT.persons) if (e.partRe) t = t.replace(e.partRe, (m, a) => isCap(m) ? entityTok(e, a !== undefined && e.first ? 'FIRST' : 'LAST', m) : m);
       return t;
     } },
@@ -1267,8 +1352,13 @@ function restoreText(text){
     // USER_1, USER\_1, [USER_1 or USER_1] with one bracket missing, plural USER_1s. Upper case only:
     // a bare lowercase user_1 is far more likely a code identifier than a reformatted token.
     const bare = new RegExp(`(?<![A-Za-z0-9_])\\[?(${LB})\\\\?_(\\d+(?:\\.\\d+)?)(?![0-9])\\]?(?=(?:'?s)?(?![A-Za-z0-9_]))`, 'g');
+    // Host_1, HOST-1, Private-IP-1, PERSON-EMAIL-1.2: hyphens for underscores, Title or upper case. A wholly
+    // lowercase form (host-1) is left alone, and so is anything inside a longer word (pre-HOST-1, HOST-1a).
+    const LH = labels.map(l => l.split('_').map(esc).join('[_-]')).join('|');
+    const loose = new RegExp(`(?<![A-Za-z0-9_\\-])(${LH})[_-](\\d+(?:\\.\\d+)?)(?![0-9])(?=(?:'?s)?(?![A-Za-z0-9_]|-[A-Za-z0-9]))`, 'gi');
     t = t.replace(bracketed, (m, l1, n1, s1, l2, n2, s2) => resolve(l1 || l2, n1 || n2, (s1 || s2 || '').replace(/\\/g, ''), m))
-         .replace(bare, (m, l, n) => resolve(l, n, '', m));
+         .replace(bare, (m, l, n) => resolve(l, n, '', m))
+         .replace(loose, (m, l, n) => /[A-Z]/.test(l.charAt(0)) ? resolve(l, n, '', m) : m);
   }
   // Token-shaped text with a label this session never used: the AI invented it or it came from another session.
   // It stays as it is; holding it only marks where it is.
@@ -1445,13 +1535,13 @@ function el(tag, cls, text){ const n = document.createElement(tag); if (cls) n.c
 // ---- Token categories: colour plus the token's own label, never colour alone ----
 const CAT_NAME = { id: 'Identity', host: 'Host and cloud', net: 'Network', org: 'Organisation', ref: 'Reference ID', ow: 'One-way' };
 const CAT_ORDER = ['id', 'host', 'net', 'org', 'ref', 'ow'];
-const CAT_OF = { USER: 'id', PERSON: 'id', EMAIL: 'id', NETBIOS: 'id', HOST: 'host', TENANT: 'org', ORG_DOMAIN: 'org', TERM: 'org',
+const CAT_OF = { USER: 'id', PERSON: 'id', EMAIL: 'id', NETBIOS: 'id', HOST: 'host', TENANT: 'org', DOMAIN: 'org', TERM: 'org',
   PRIVATE_IP: 'net', PUBLIC_IP: 'net', MAC: 'net', GUID: 'ref', DOMAIN_SID: 'ref', ACCOUNT: 'ref', PHONE: 'ref' };
 // Anything else is a custom-term label (ORG, TEAM, ...), so it counts as organisation.
 // Colour follows what the value is (its first type), also after it was grouped under another root.
 const catOf = row => { const L = row.type || row.label; return row.oneWay ? 'ow' : L.startsWith('AZ_') ? 'host' : /^PERSON(?:_|$)/.test(L) ? 'id' : (CAT_OF[L] || 'org'); };
 // "Identity · first name": the category, plus which entity form a token stands for.
-const PART_NAME = { FIRST: 'first name', LAST: 'last name', USER: 'username' };
+const PART_NAME = { FIRST: 'first name', LAST: 'last name', USER: 'username', EMAIL: 'email', NETBIOS: 'NetBIOS domain', DOMAIN: 'domain', TENANT: 'tenant' };
 const typeText = row => CAT_NAME[catOf(row)] + (row.grouped ? ' \u00b7 grouped' : row.part ? ' \u00b7 ' + PART_NAME[row.part]
   : row.entity ? ' \u00b7 ' + (row.label === 'PERSON' ? 'full name' : row.label === 'ORG' || row.label === 'HOST' ? 'entity' : row.label.toLowerCase().replace(/_/g, ' ')) : '');
 const TYPE_NAME = { PERSON: 'person', ORG: 'organisation', HOST: 'host', PROJECT: 'project', OTHER: 'other' };

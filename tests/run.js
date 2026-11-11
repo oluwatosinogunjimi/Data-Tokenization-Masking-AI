@@ -54,6 +54,8 @@ for (const c of cases){
     { name: 'prose and code left alone', reply: `user 1 of 3, host 1, ${hn.toLowerCase()} = 5, ${hn}0`, want: [`user 1 of 3, host 1, ${hn.toLowerCase()} = 5, ${hn}0`] },
     { name: 'one-way tokens stay tokens', reply: `[${secret.slice(1, -1).toLowerCase()}] and ${card} and \\[${card.slice(1, -1).replace('_', '\\_').replace(/\*/g, '\\*')}\\]`, want: [`${secret} and ${card} and ${card}`], not: ['Hunter2!x', '4111'], oneWay: [secret, card.replace(/:.*\]$/, ']')], stats: 'One-way, kept as tokens' },
     { name: 'unknown tokens reported', reply: 'See [USER_999] and [FOO_1].', want: ['[USER_999]', '[FOO_1]'], unknown: ['[USER_999]', '[FOO_1]'], stats: 'Not restored, not from this session: [USER_999], [FOO_1].' },
+    { name: 'bare hyphenated, Title and upper case', reply: `${hn.replace('_', '-')} from ${ipn.replace(/_/g, '-')}; Host_${hn.split('_')[1]} and Private-Ip-${ipn.split('_').pop()}`, want: [`${H} from ${IP}; ${H} and ${IP}`] },
+    { name: 'bare lowercase and inside words left alone', reply: `host-1 host_1 pre-${hn.replace('_', '-')} ${hn.replace('_', '-')}a ${hn.replace('_', '-')}0x WEB-1`, want: [`host-1 host_1 pre-${hn.replace('_', '-')} ${hn.replace('_', '-')}a ${hn.replace('_', '-')}0x WEB-1`], restored: 0 },
   ];
   for (const c of checks){
     const out = p.restore(c.reply);
@@ -70,6 +72,25 @@ for (const c of cases){
   const out = p.restore(host);
   const r = p.lastRestore(), rep = p.PM.report(r).map(l => l.text).join(' ');
   out === host && r.mappingEmpty && r.unknown.length === 1 && /mapping is empty/.test(rep) ? ok('restore: after End session') : fail('restore: after End session', `got "${out}" / "${rep}"`);
+}
+
+// ---- 2b. Linked entity forms: every form shares the entity's number, and a reformatted reply restores exactly ----
+{
+  const p = loadPage({ terms: ['Jane Doe | PERSON', 'Contoso | ORG', 'fs01 | HOST', 'Nexus Grid | PROJECT'] });
+  const raw = 'Jane Doe <jane.doe@contoso.com> on CONTOSO\\jdoe via fs01.corp.contoso.local and \\\\fs01\\x; Nexus_Grid_prod01, Contoso, contoso.co.uk';
+  const masked = p.mask(raw);
+  const nums = {};
+  for (const r of p.PM.rows()) if (r.entity) (nums[r.root] = nums[r.root] || new Set()).add(r.token);
+  const problems = [];
+  if (Object.keys(nums).length !== 4) problems.push(`expected 4 entity roots, got ${Object.keys(nums).join(', ')}`);
+  for (const [root, toks] of Object.entries(nums)){
+    const n = root.slice(root.lastIndexOf('_') + 1, -1);
+    for (const t of toks) if (t.slice(t.lastIndexOf('_') + 1, -1).split('.')[0] !== n) problems.push(`${t} does not share ${root}'s number`);
+  }
+  const reply = masked.replace(/\[([A-Z_]+)_(\d+(?:\.\d+)?)\](?!_)/g, (m, l, n) => (l.length % 2 ? `${l.replace(/_/g, '-')}-${n}` : `[${l.toLowerCase().replace(/_/g, ' ')} ${n}]`));
+  const back = p.restore(reply);
+  if (back !== raw) problems.push(`round trip differs: ${back}`);
+  problems.length ? fail('entity linking round trip', problems.join('; '), masked) : ok('entity linking round trip', masked);
 }
 
 // ---- 3. Session: a second paste reuses tokens and learned domains ----

@@ -51,9 +51,12 @@ Jane Doe, Doe, Jane, J. Doe   ->  [PERSON_1], [PERSON_1.2], [PERSON_1.3]
 Jane (capitalised only)       ->  [PERSON_FIRST_1]
 Doe (capitalised only)        ->  [PERSON_LAST_1]
 jdoe, jane.doe, CORP\jdoe     ->  [PERSON_USER_1], [PERSON_USER_1.2], [NETBIOS_1]\[PERSON_USER_1]
+jane.doe@example.com          ->  [PERSON_EMAIL_1]
 ```
 
-Each different spelling gets its own sub-index (`.2`, `.3`), so Restore puts back exactly what was there. Other types match the whole term only. "grace period" or "will" stay as they are; a capitalised "Will" at the start of a sentence is masked if a listed person is called Will. The list is the same as **Custom terms** in Settings (`Jane Doe | PERSON`, one per line). It is kept for the tab, also after **End session**; to preload entities, edit `DEFAULT_TERMS` in your copy of the file.
+Other types get linked tokens too: `Montagu Evans | ORG` also masks a capitalised "Montagu" or "Evans" on its own (generic words like Ltd or Group never count), `Nexus Grid | PROJECT` also masks `Nexus_Grid`, `nexusgrid` and the entity part of identifiers like `Nexus_Grid_prod01` → `[PROJECT_1.2]_prod01`, `Contoso | ORG` links `CONTOSO\` and any `contoso.*` domain, and `fs01 | HOST` links `fs01.corp.example.local` and `\\fs01`.
+
+Each different spelling gets its own sub-index (`.2`, `.3`), so Restore puts back exactly what was there. "grace period" or "will" stay as they are; a capitalised "Will" at the start of a sentence is masked if a listed person is called Will. The list is the same as **Custom terms** in Settings (`Jane Doe | PERSON`, one per line). It is kept for the tab, also after **End session**; to preload entities, edit `DEFAULT_TERMS` in your copy of the file.
 
 ## Grouping
 
