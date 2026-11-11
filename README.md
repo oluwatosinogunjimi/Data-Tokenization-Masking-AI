@@ -6,6 +6,8 @@ Paste Masker is a single offline HTML file. It replaces usernames, emails, hostn
 
 Nothing leaves your machine. The page blocks all network access and saves nothing.
 
+**Use it online:** https://oluwatosinogunjimi.github.io/Data-Tokenization-Masking-AI/ (the same file, served by GitHub Pages; it still runs entirely in your browser). Or download `paste-masker.html` and open it locally.
+
 ## Quick start
 
 1. Download `paste-masker.html` and open it in a browser. There is nothing to install.
@@ -71,6 +73,8 @@ Tests need Node 18 or later and nothing else. Test data must be fictional: use e
 
 ```text
 paste-masker.html        the tool
+index.html               redirects the GitHub Pages site to the tool
+.nojekyll                serves files as they are (no Jekyll processing)
 docs/ARCHITECTURE.md     components, data flow, detectors, token map, guarantees and limits
 tests/page.js            loads the page script in Node with a small DOM stub
 tests/cases.js           masking test cases, including known gaps
