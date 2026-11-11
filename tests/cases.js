@@ -5,7 +5,7 @@
 //   leak  strings that must NOT appear in the masked output
 //   keep  strings that MUST still appear (false-positive guard)
 //   same  a label prefix (e.g. 'TENANT_') whose tokens must all be the same token
-//   opts  page options for this case, e.g. { keepEmailDomain: true }
+//   opts  engine options for this case, e.g. { keepEmailDomain: true, terms: ['Jane Doe | PERSON'], off: ['emails'], allow: [...] }
 //   todo  a known gap with the reason; the runner reports these separately and fails if one starts passing
 'use strict';
 module.exports = [
@@ -185,4 +185,48 @@ module.exports = [
   {"name":"KV FP field names","in":"AccessTokenLifetime=3600 TokenIssuerType=AzureAD tokenProtectionStatus: unbound passwordLastSet=2026-01-01 secret_rotation=enabled sig=SHA256","leak":[],"keep":["AzureAD","unbound","2026-01-01","enabled"]},
   {"name":"IP in version context","in":"Agent 1.2.3.4 updated","leak":[],"keep":[]},
   {"name":"existing tokens text","in":"note: see [USER_1] above","leak":[],"keep":["[USER_1]"]},
+
+  // ---- Entities (the custom-terms list): linked tokens for name forms, one token per distinct surface ----
+  {"name": "entity: full name", "in": "Call with Jane Doe today", "leak": ["Jane", "Doe"], "keep": ["Call with [PERSON_1] today"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: every full-name form, one sub-index each", "in": "Jane Doe; Doe, Jane; DOE, Jane; JANE DOE; jane doe; J. Doe; J Doe; Jane A. Doe; Jane Alice Doe.", "leak": ["Jane", "Doe", "JANE", "DOE", "jane", "doe"], "keep": ["[PERSON_1];", "[PERSON_1.2];", "[PERSON_1.3];", "[PERSON_1.4];", "[PERSON_1.5];", "[PERSON_1.6];", "[PERSON_1.7];", "[PERSON_1.8];", "[PERSON_1.9]."], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: same surface, same token", "in": "Jane Doe met Jane Doe", "leak": ["Jane"], "keep": ["[PERSON_1] met [PERSON_1]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: first and last name alone, capitalised", "in": "Jane said hi to Doe. JANE agreed with DOE's plan, Jane's too.", "leak": ["Jane", "Doe", "JANE", "DOE"], "keep": ["[PERSON_FIRST_1] said hi to [PERSON_LAST_1].", "[PERSON_FIRST_1.2] agreed with [PERSON_LAST_1.2]'s plan", "[PERSON_FIRST_1]'s too."], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: a part seen first still gets the entity number", "in": "Jane arrived.\nLater Jane Doe left and jdoe logged off.", "leak": ["Jane", "jdoe"], "keep": ["[PERSON_FIRST_1] arrived.", "[PERSON_1] left", "[PERSON_USER_1] logged"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: numbers shared with the person detectors", "in": "Display Name: Bob Smith\nmet Jane Doe", "leak": ["Bob", "Jane"], "keep": ["Display Name: [PERSON_2]", "met [PERSON_1]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: a person listed before a Display Name field keeps its link", "in": "Display Name: Jane Doe\nthen Doe, Jane", "leak": ["Jane", "Doe"], "keep": ["Display Name: [PERSON_1]", "then [PERSON_1.2]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: username forms", "in": "jdoe jane.doe jane_doe jane-doe janedoe j.doe doej doe.jane janed", "leak": ["jdoe", "jane", "doe"], "keep": ["[PERSON_USER_1] [PERSON_USER_1.2] [PERSON_USER_1.3] [PERSON_USER_1.4] [PERSON_USER_1.5] [PERSON_USER_1.6] [PERSON_USER_1.7] [PERSON_USER_1.8] [PERSON_USER_1.9]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: username forms are case-insensitive", "in": "JDOE and Jane.Doe", "leak": ["JDOE", "Jane.Doe"], "keep": ["[PERSON_USER_1] and [PERSON_USER_1.2]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: short username forms are skipped", "in": "Jo Li signed; joli and jli", "leak": ["Jo Li"], "keep": ["jli"], "opts": {"terms": ["Jo Li | PERSON"]}},
+  {"name": "entity routing: DOMAIN\\user keeps the NETBIOS part", "in": "logon CORP\\jdoe ok", "leak": ["jdoe", "CORP\\"], "keep": ["[NETBIOS_1]\\[PERSON_USER_1] ok"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity routing: profile path", "in": "C:\\Users\\jdoe\\AppData\\Local", "leak": ["jdoe"], "keep": ["C:\\Users\\[PERSON_USER_1]\\AppData"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity routing: net user", "in": "net user jdoe /add", "leak": ["jdoe"], "keep": ["net user [PERSON_USER_1] /add"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity routing: account field", "in": "Account Name:\t\tjdoe\nuser=jane.doe", "leak": ["jdoe", "jane.doe"], "keep": ["[PERSON_USER_1]", "user=[PERSON_USER_1.2]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity routing: account field with a first name", "in": "Account Name: Jane", "leak": ["Jane"], "keep": ["Account Name: [PERSON_FIRST_1]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity routing: display name", "in": "Display Name: Jane Doe", "leak": ["Jane"], "keep": ["Display Name: [PERSON_1]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity routing: honorifics", "in": "Mrs Doe and Dr Jane Doe", "leak": ["Doe", "Jane"], "keep": ["Mrs [PERSON_LAST_1] and Dr [PERSON_1]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity routing: mail display name", "in": "From: \"Jane Doe\" <jane.doe@contoso.com>", "leak": ["Jane", "jane.doe"], "keep": ["\"[PERSON_1]\" <[EMAIL_1]>"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity routing: keep email domain masks the name part as a username", "in": "From: jane.doe@contoso.com and jdoe@contoso.com", "leak": ["jane.doe", "jdoe@"], "keep": ["[PERSON_USER_1]@contoso.com", "[PERSON_USER_1.2]@contoso.com"], "opts": {"terms": ["Jane Doe | PERSON"], "keepEmailDomain": true}},
+  {"name": "entity: whole emails stay EMAIL", "in": "mail jane.doe@contoso.com", "leak": ["jane.doe", "PERSON"], "keep": ["[EMAIL_1]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity bait: lowercase first name is a word", "in": "a grace period of 5 days, Grace Hopper approved", "leak": ["Grace Hopper"], "keep": ["a grace period of 5 days", "[PERSON_1] approved"], "opts": {"terms": ["Grace Hopper | PERSON"]}},
+  {"name": "entity bait: will and Will", "in": "we will see what Will Smith says", "leak": [], "keep": ["we will see what [PERSON_1] says"], "opts": {"terms": ["Will Smith | PERSON"]}},
+  {"name": "entity bait: name inside a longer word", "in": "Doesn't matter; Doe123 and JaneDoe2 and Mary-Jane stay", "leak": [], "keep": ["Doesn't", "Doe123", "JaneDoe2", "Mary-Jane"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity bait: username inside an email stays (emails off)", "in": "mail jdoe@example.com and xjdoe@example.com", "leak": [], "keep": ["jdoe@example.com", "xjdoe@example.com"], "opts": {"terms": ["Jane Doe | PERSON"], "off": ["emails"]}},
+  {"name": "entity: whole emails stay EMAIL even when a username form", "in": "mail jdoe@example.com", "leak": ["jdoe", "PERSON"], "keep": ["mail [EMAIL_1]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity bait: username inside a hash, file name or identifier", "in": "a1jdoe9f /files/jdoe.txt jdoe.png jdoe.tar.gz jdoe-pc C:\\temp\\jdoe2\\x x_jdoe", "leak": [], "keep": ["a1jdoe9f", "/files/jdoe.txt", "jdoe.png", "jdoe.tar.gz", "jdoe-pc", "jdoe2", "x_jdoe"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity bait: existing token text", "in": "see [PERSON_1] and [USER_1]", "leak": [], "keep": ["[PERSON_1]", "[USER_1]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: single-word person, capitalised only", "in": "Madonna sang; madonna lily", "leak": ["Madonna"], "keep": ["[PERSON_1] sang; madonna lily"], "opts": {"terms": ["Madonna | PERSON"]}},
+  {"name": "entity: other types match the whole term only, one sub-index per surface", "in": "Acme Ltd, ACME LTD and acme  ltd; Acme rocks", "leak": ["Acme Ltd", "ACME LTD", "acme  ltd"], "keep": ["[ORG_1], [ORG_1.2] and [ORG_1.3]", "Acme rocks"], "opts": {"terms": ["Acme Ltd | ORG"]}},
+  {"name": "entity: host entity routed from host fields", "in": "Device=NAS-01 then nas-01 again", "leak": ["NAS-01", "nas-01"], "keep": ["Device=[HOST_1] then [HOST_1.2] again"], "opts": {"terms": ["NAS-01 | HOST"]}},
+  {"name": "entity: project and other types", "in": "Project Falcon and Falcon-2 by Northwind", "leak": ["Project Falcon", "Northwind"], "keep": ["[PROJECT_1] and Falcon-2 by [OTHER_1]"], "opts": {"terms": ["Project Falcon | PROJECT", "Northwind | OTHER"]}},
+  {"name": "entity: never mask wins", "in": "Jane Doe and jdoe", "leak": ["Jane"], "keep": ["jdoe"], "opts": {"terms": ["Jane Doe | PERSON"], "allow": ["jdoe"]}},
+  {"name": "entity in URLs: host label, path segment, query values and fragment", "in": "https://jdoe.example.com/jdoe?x=jdoe&next=/a#jdoe", "leak": ["jdoe"], "keep": ["https://[PERSON_USER_1].example.com/[PERSON_USER_1]?x=[PERSON_USER_1]&next=/a#[PERSON_USER_1]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity in URLs: key=value with another form, path at the end", "in": "https://example.com/u/jdoe?user=jane.doe&id=7 and https://example.com/u/jane.doe.", "leak": ["jdoe", "jane.doe"], "keep": ["/u/[PERSON_USER_1.2]?user=[PERSON_USER_1]&id=7", "/u/[PERSON_USER_1]."], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity in URLs: percent-encoded and plus-encoded names", "in": "https://example.com/people/Jane%20Doe?owner=Jane+Doe", "leak": ["Jane", "Doe"], "keep": ["/people/[PERSON_1]?owner=[PERSON_1.2]"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity in URLs: capitalised name only", "in": "https://example.com/team/Jane/ and https://example.com/team/jane/", "leak": ["/team/Jane/"], "keep": ["/team/[PERSON_FIRST_1]/", "/team/jane/"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity in URLs: user name, single-label host, two-label form", "in": "http://jdoe:8080/x and ftp://jdoe@ftp.example.com/ and https://jane.doe.example.com/", "leak": ["jdoe", "jane.doe"], "keep": ["http://[PERSON_USER_1]:8080/x", "ftp://[PERSON_USER_1]@ftp.example.com/", "https://[PERSON_USER_1.2].example.com/"], "opts": {"terms": ["Jane Doe | PERSON"], "off": ["emails"]}},
+  {"name": "entity in URLs: other entity types", "in": "https://acme.example.com/acme?org=Acme#Acme", "leak": ["acme.", "/acme", "=Acme", "#Acme"], "keep": ["https://[ORG_1].example.com/[ORG_1]?org=[ORG_1.2]#[ORG_1.2]"], "opts": {"terms": ["Acme | ORG"]}},
+  {"name": "entity bait in URLs: partial segments, file names and keys", "in": "https://example.com/xjdoe/jdoe2/jdoe.png?q=jdoe-x&x_jdoe=1#xjdoe", "leak": [], "keep": ["https://example.com/xjdoe/jdoe2/jdoe.png?q=jdoe-x&x_jdoe=1#xjdoe"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: hostnames outside URLs", "in": "ping jdoe.corp.example.com, jdoe.corp and jane.doe.example.org", "leak": ["jdoe", "jane.doe"], "keep": ["ping [PERSON_USER_1].corp.example.com, [PERSON_USER_1].corp and [PERSON_USER_1.2].example.org"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: UNC and SMB paths", "in": "\\\\jdoe\\share, \\\\fs01\\jdoe\\x, \\\\fs01\\Jane Doe\\x and smb://fs01/jdoe/x", "leak": ["jdoe", "Jane"], "keep": ["\\\\[PERSON_USER_1]\\share", "\\[PERSON_USER_1]\\x", "\\[PERSON_1]\\x", "smb://[HOST_1]/[PERSON_USER_1]/x"], "opts": {"terms": ["Jane Doe | PERSON"]}},
+  {"name": "entity: Linux paths in quotes", "in": "\"/srv/jdoe/data\" and '/srv/Jane/x' and \"/opt/jdoe\"", "leak": ["jdoe", "Jane"], "keep": ["\"/srv/[PERSON_USER_1]/data\"", "'/srv/[PERSON_FIRST_1]/x'", "\"/opt/[PERSON_USER_1]\""], "opts": {"terms": ["Jane Doe | PERSON"]}},
 ];

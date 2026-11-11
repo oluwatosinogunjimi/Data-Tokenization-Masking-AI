@@ -11,8 +11,9 @@ The file has two scripts. The **engine** (`<script id="engine">`) does all maski
 | Page shell | `<head>`, `<header>`, `<main>`, dialogs | The Content Security Policy, the two embedded fonts, the top bar, the Mask and Restore tabs, the mapping table, the settings drawer, the confirm dialog and the shortcuts panel. Every text field carries the privacy attributes described under [Text fields](#text-fields). |
 | Defaults | `DEFAULT_TERMS`, `DEFAULT_INTERNAL_DOMAINS`, `DEFAULT_NEVER_MASK` at the top of the engine script | Values loaded into the settings boxes when the page opens. Edit them in your own copy of the file. |
 | Engine interface | `PM` at the end of the engine script | The only way in or out of the engine (see [The PM interface](#the-pm-interface)). |
-| Config | `configure()` | Turns a plain settings object into `CFG` (enabled groups, options, custom terms, internal domains) and `ALLOW` (never-mask list). |
+| Config | `configure()`, `parseTerms()` | Turns a plain settings object into `CFG` (enabled groups, options, custom terms, internal domains) and `ALLOW` (never-mask list). |
 | Detectors | `DETECTORS` array | Ordered list of pattern groups. Each replaces what it finds with a placeholder via `mk()`. |
+| Entity registry | `ENT`, `buildEntities()`, `entityTok()`, `routeEntity()` | The custom-terms list as entities: the forms each one is matched in, its linked tokens and sub-indexes (see [Entities](#entities)). |
 | Tokeniser | `mk(label, value, options)` | Looks up or creates the token for a value, records it in the session store, counts how often it was seen, and returns a placeholder. |
 | Placeholder layer | `place()`, `enc()`, `dec()` | Holds finished tokens out of the text while the remaining detectors run (see below). |
 | Session store | `S` | The token map for the current tab: forward map, reverse map, per-label counters, mapping rows and learned domains. |
@@ -24,15 +25,17 @@ The file has two scripts. The **engine** (`<script id="engine">`) does all maski
 ```text
 PM.configure({ on: { group: false }, keepEmailDomain, keepPublicIp, terms, domains, allow })
     Groups left out of "on" are on. terms, domains and allow are arrays of lines or one newline-separated string.
-PM.mask(text)      -> { text, spans: [{ start, end, token }], counts: { LABEL: n } }
+PM.mask(text)      -> { text, spans: [{ start, end, token }], counts: { LABEL: n }, entities: { entityKey: matches } }
 PM.restore(text)   -> { text, restored, unknown: [token], oneWay: [token], mappingEmpty,
                         spans: [{ start, end, token, kind: 'restored' | 'oneway' | 'unknown' }] }
 PM.report(result)  -> [{ kind, text }]   the restore report lines, built from the token lists only
-PM.rows()          -> [{ token, label, value (null if one-way), oneWay, seen }] in creation order
+PM.rows()          -> [{ token, label, value (null if one-way), oneWay, seen, last, entity, part }] in creation order
+                      seen: uses this session; last: uses in the last Mask; part: '', FIRST, LAST or USER
 PM.lookup(token)   -> one such row, or null
 PM.size()          -> number of tokens in the session
 PM.clear()         -> forget every token and learned domain
-PM.groups, PM.defaults, PM.sample   detector group names, the editable defaults, the built-in sample
+PM.parseTerms(text) -> [{ term, label, key }]   the entity list as configure() reads it
+PM.groups, PM.defaults, PM.sample, PM.entityTypes   detector groups, editable defaults, built-in sample, offered entity types
 ```
 
 `spans` give the position of every token in the masked text (or of every restored value, kept one-way token and unknown token in the restored text). They are collected while the placeholders are expanded, so the interface highlights tokens without parsing the text again. A card token's span shows `[CARD_1:****1111]` and names `[CARD_1]`, the token the mapping knows.
@@ -69,15 +72,17 @@ flowchart LR
 - **Token popover.** Hovering or focusing a token shows its token, type, how often it was seen and its real value, and outlines every occurrence. Click copies the real value, Shift-click the token; a one-way token says its value was never kept and click copies the token. On touch, a tap pins the popover with "Copy value" and "Copy token" buttons. In an output, arrow keys move between tokens and Enter copies. In the restored text, the popover shows which token a value came from; unknown tokens get a wavy underline.
 - **Copy is always plain text.** Copy buttons write the engine's string. A copy handler on the document writes `text/plain` only; when the selection is inside an output, its start and end are mapped back to offsets in the engine's string and that slice is copied, so a hand-made selection is exactly the masked (or restored) text. Toasts name the token ("Copied real value of [HOST_1]") and never contain a value.
 - **Hide values.** For screen sharing, real values are left out of the popover and the mapping table altogether, replaced by a fixed-width bar; copying still works. While it is on, the filter matches tokens and types only.
-- **Mapping table.** Token (click copies it), type, real value, times seen, and a copy-value button (disabled for one-way rows, which read "Not kept (one-way)"). A filter box (`/`) narrows it. At most 500 rows are drawn, with a note to filter, so huge sessions stay fast.
+- **Mapping table.** Token (click copies it), type (for entities with the form, e.g. "Identity · first name"), real value, times in the last Mask, and a copy-value button (disabled for one-way rows, which read "Not kept (one-way)"). A filter box (`/`) narrows it. At most 500 rows are drawn, with a note to filter, so huge sessions stay fast.
 - **Settings drawer.** A modal `<dialog>` from the right (full width on phones): detector toggles grouped by category with the same swatches, the two keep options, Custom terms, Internal domains, Never mask, and the data-handling note. Esc closes it and focus returns. A summary in the Mask pane ("12 detectors on, 1 custom term, 1 domain") opens it. Changes apply on the next Mask.
 - **Shortcuts.** Ctrl/⌘+Enter runs the current tab; M and R switch tabs, S opens settings, / focuses the filter, ? shows the list, Esc closes. Single letters only act when focus is not in a text field and no dialog is open.
 - **Theme.** Day (paper) and Night (graphite) palettes. The page follows `prefers-color-scheme` until the user picks one with the sun/moon button.
+- **Entities strip.** Above the two panes on the Mask tab (collapsible): a text box, a type (Person, Organisation, Host, Project, Other) and Add, then one chip per entity with its type swatch, how many times it matched in the last Mask, and a remove button. Adding or removing re-masks when there is raw text. The chips are drawn from the Settings "Custom terms" box, which is the list itself, so editing either keeps both in step. Hide values replaces chip text with a bar. The list is a setting: End session keeps it, closing the tab loses it (preload entities with `DEFAULT_TERMS`).
+- **Select-to-add.** Selecting 1–100 characters on one line in the raw text, or in the unmasked part of the masked output, shows a small "Add as entity" control (type plus Add) next to the selection. The selected text is held only until it is added or the control closes, and is never shown in the control. A selection that touches a token offers nothing.
 - **Large pastes.** The first 20,000 tokens are highlighted and the rest of the output is plain text, with a note; Copy masked still copies everything.
 
 ## Tokens
 
-A token is `[LABEL_n]`: an upper-case label and a counter that is separate per label, for example `[USER_3]` or `[PRIVATE_IP_12]`. Card tokens carry the last four digits as a suffix: `[CARD_2:****1111]`.
+A token is `[LABEL_n]`: an upper-case label and a counter that is separate per label, for example `[USER_3]` or `[PRIVATE_IP_12]`. Card tokens carry the last four digits as a suffix: `[CARD_2:****1111]`. Entity tokens can carry a sub-index for a further spelling of the same entity: `[PERSON_1.2]` (see [Entities](#entities)).
 
 - **Consistent.** The same value always gets the same token for the life of the tab, across every Mask run, so correlation survives ("the same user on two hosts"). Once a user, host or name has a token, the re-masking step gives it the same token wherever else it appears, even where no detector would have found it.
 - **Normalised.** Values are compared after normalisation, so variants share a token: case for most values, digits only for phones (with `+234`/`+44` folded to a leading `0`), `:` separators for MACs, `.` for defanged IPs (`1.2.3[.]4`).
@@ -104,6 +109,7 @@ AI replies often reformat tokens. Restore accepts, for any label used in this se
 | One bracket missing | `[HOST_1 was down`, `HOST_1]` | Yes |
 | Plural or possessive | `HOST_1s`, `HOST_1's` | Yes (the `s` stays) |
 | Invisible characters inside | zero-width space or joiner between label and number | Yes |
+| Sub-indexed, any of the forms above | `[PERSON_1.2]`, `[person 1.2]`, `PERSON_USER_1.2` | Yes, to that exact surface form |
 | Bare lowercase | `host_1` | No: more likely a code identifier |
 | Prose | `host 1`, `user 1 of 3` | No: bare forms need the underscore |
 | A different number | `HOST_10` when only `HOST_1` exists | No, reported as not restored |
@@ -116,6 +122,29 @@ The report under the restored text (`PM.report()`) lists:
 - **Not restored, not from this session**: token-shaped text the session doesn't know, such as a number the AI invented, a token from another tab, or anything left after "End session".
 - **One-way, kept as tokens**: secrets, cards and national IDs, written back in their canonical form (`[SECRET_1]`, `[CARD_1:****1111]`).
 
+## Entities
+
+The **entity list is the custom-terms list**: one `term | TYPE` per line, edited in the Entities strip or in Settings. The offered types are `PERSON`, `ORG`, `HOST`, `PROJECT` and `OTHER`; any other label typed in Settings still works, and a line without a label is `TERM`.
+
+**One number per entity, shared by all its forms.** For the person `Jane Doe | PERSON` (first word = first name, last word = last name, words between = middle names):
+
+| Token | Form | Matched |
+|---|---|---|
+| `[PERSON_n]` | The full name and its variants: `Jane Doe`, `jane doe`, `JANE DOE`, `Doe, Jane`, `DOE, Jane`, `J. Doe`, `J Doe`, `Jane A. Doe`, `Jane Alice Doe` | Any case |
+| `[PERSON_FIRST_n]` | `Jane` alone | Capitalised only (`Jane`, `JANE`; not `jane`), whole word, at least 2 letters |
+| `[PERSON_LAST_n]` | `Doe` alone | Same rules as the first name |
+| `[PERSON_USER_n]` | Username forms `jane.doe`, `janedoe`, `jane_doe`, `jane-doe`, `jdoe`, `j.doe`, `doej`, `doe.jane`, `janed` | Any case, whole identifier; forms shorter than 4 characters are skipped |
+
+Other entity types match the whole term only, in any case and spacing; they get no part or username forms.
+
+**Sub-index, for exact restore.** Within one label and number, the first surface string seen gets `[LABEL_n]` and each further distinct surface string gets `[LABEL_n.2]`, `[LABEL_n.3]`…: `Jane Doe` → `[PERSON_1]`, `Doe, Jane` → `[PERSON_1.2]`, `JANE DOE` → `[PERSON_1.3]`; `jdoe` → `[PERSON_USER_1]`, `jane.doe` → `[PERSON_USER_1.2]`; `Acme Ltd` → `[ORG_1]`, `ACME LTD` → `[ORG_1.2]`. Every token restores to exactly its own surface string, so a reply restores to the original text character for character.
+
+**Numbering.** An entity's number is allocated once, on first use of any of its forms, so `Jane` seen before `Jane Doe` still gives `[PERSON_FIRST_1]` and later `[PERSON_1]`. Person numbers share the `PERSON` counter with the display-name, title and mail-name detectors, so numbers never collide; a plain token already made for the same full value keeps its number and becomes the entity's first surface form.
+
+**Routing.** `mk()` asks `routeEntity()` first, so entity forms found by other detectors get entity tokens: `CORP\jdoe` → `[NETBIOS_1]\[PERSON_USER_1]` (the NETBIOS part is still masked as NETBIOS), `C:\Users\jdoe`, `net user jdoe`, `Account Name: jdoe`, `Display Name: Jane Doe` → `[PERSON_1]`, `Mrs Doe` → `Mrs [PERSON_LAST_1]`, `"Jane Doe" <…>`, host fields for `HOST` entities, and the name part of an email when *Keep email domain* is on (`jane.doe@contoso.com` → `[PERSON_USER_1]@contoso.com`). Whole emails, with the option off, stay `[EMAIL_n]`.
+
+**Where the entity passes run.** Listed people's full-name forms run just before the username detectors (so `Dr Jane A. Doe` stays one name). The rest run where custom terms always did: other entity types, then URLs, then username forms, then a first or last name alone. In a URL, a host label, path segment, query key or value, fragment or user name that is wholly an entity form is masked, percent- or plus-encoded too (`https://jdoe.example.com/u/jdoe?owner=Jane%20Doe#jdoe` → `https://[PERSON_USER_1].example.com/u/[PERSON_USER_1]?owner=[PERSON_1]#[PERSON_USER_1]`); the token stands for the text exactly as written in the URL. Outside URLs, a username form is masked as the first label of a hostname (`jdoe.corp.example.com`, `jdoe.corp`), as a whole path segment (`\\fs01\jdoe\x`, `"/srv/jdoe/data"`) and as a UNC host (`\\jdoe\share`); a capitalised first or last name also counts as a whole path segment. Boundaries keep matches out of longer words and identifiers (`Doesn't`, `Doe123`, `Mary-Jane`, `x_jdoe`, `jdoe2`, `/xjdoe/`), file names (`jdoe.txt`, `jdoe.png`, `jdoe.tar.gz`), emails (whole emails stay `[EMAIL_n]`), hashes and existing tokens. The re-masking step skips entity tokens, since the entity passes already find every form.
+
 ## Session store
 
 ```text
@@ -126,7 +155,11 @@ S = {
   rows: [{ token, label, orig | null, seen }]                         // mapping table, in creation order
   byToken: Map<"[LABEL_n]", row>
   learned: Set<domain>                                                // organisation domains learned from emails
+  entNum: Map<entity key, n>                                          // each entity's number
+  sub: Map<"LABEL_n", k>                                              // surface forms numbered so far
+  entTokens: Set<token>                                               // tokens owned by entities
 }
+// Entity surface forms are keyed "=LABEL_n|exact surface" in fwd.
 ```
 
 Each row also counts how often its token was used (`seen`), and `byToken` indexes the rows by token. The store lives only in page memory. Nothing is written to `localStorage`, cookies, IndexedDB or files.
@@ -165,19 +198,20 @@ Detectors run in this order. Earlier means more specific: secrets go first so a 
 | 5 | Phone numbers | `PHONE` | Nigerian mobile, UK mobile, and `+country` numbers, 10–15 digits | Reversible |
 | 6 | Card numbers | `CARD` (`:****last4`) | 13–19 digits with a known card prefix (IIN) and a valid Luhn check | One-way |
 | 7 | Emails and UPNs | `EMAIL`, or `USER` with "keep email domain" | `name@example.com`-style addresses, with bounded repeats | Reversible |
-| 8 | Usernames and names | `USER`, `NETBIOS` | `C:\Users\NAME`, `/home/NAME`, `/Users/NAME`, `DOMAIN\NAME` (skips well-known domains, file names and folders inside spaced paths). `DOMAIN\NAME$` is a machine account and becomes `HOST` | Reversible |
+| 8 | Listed people (always on) | `PERSON` | Full-name forms of `PERSON` entities, before the account and name fields | Reversible |
+| 9 | Usernames and names | `USER`, `NETBIOS` | `C:\Users\NAME`, `/home/NAME`, `/Users/NAME`, `DOMAIN\NAME` (skips well-known domains, file names and folders inside spaced paths). `DOMAIN\NAME$` is a machine account and becomes `HOST` | Reversible |
 | | | `USER` | Usernames in commands: `net user NAME`, `net localgroup … NAME /add`, `/user:`, `/u:`, `/ru`, `--user`, `-UserName`, and `-u`/`-U`/`-l` for tools where it means user (psexec, nxc, sqlcmd, mysql, psql, smbclient, hydra and similar), `curl -u NAME:`, `domain/NAME:…@host` | Reversible |
 | | | `USER`, `NETBIOS`, `ORG_DOMAIN` | Key/value fields in Windows events, JSON, CEF and key=value logs: account keys (`Account Name`, `*AccountName`, `*UserName`, `SAM Account Name`, `suser`, `duser`, `user`…) and domain keys (`Account Domain`, `*DomainName`…) | Reversible |
 | | | `USER` | Auth logs: `Accepted/Failed … for NAME`, `Invalid user NAME`, `session opened for user NAME`, `sudo: NAME :` | Reversible |
 | | | `PERSON` | Display-name fields (`Display Name`, `DisplayName`, `UserDisplayName`, `givenName`…), a name after a title (`Mr`, `Mrs`, `Dr`, `Prof`, `Engr`…), and a mail display name before a masked address (`"Jane Doe" <…>`) | Reversible |
-| 9 | Hostnames and cloud resource names | `HOST`, `ORG_DOMAIN` | Anything under a listed internal domain or a domain learned from email addresses; `\\host\share`; `DESKTOP-`, `LAPTOP-`, `WIN-`, `SRV-` names | Reversible |
+| 10 | Hostnames and cloud resource names | `HOST`, `ORG_DOMAIN` | Anything under a listed internal domain or a domain learned from email addresses; `\\host\share`; `DESKTOP-`, `LAPTOP-`, `WIN-`, `SRV-` names | Reversible |
 | | | `HOST` | Host fields (`*DeviceName`, `*ComputerName`, `*HostName`, `Workstation Name`, `Computer`, `devname`, `shost`, `dhost`, `host=`…), the host in a syslog line, and hostname-shaped words after `device`, `host`, `computer`, `server`, `workstation`. A dotted name in a destination-style field (`DestinationHostName`, `dhost`, `host=`) is often a public site, so it is masked only under a known domain or a private suffix (`.local`, `.lan`, `.internal`, `.corp`) | Reversible |
 | | | `AZ_STORAGE`, `AZ_SERVICEBUS`, `AZ_SQL`, `AZ_KEYVAULT`, `AZ_APP`, `AZ_REGISTRY`, `AZ_COSMOS`, `TENANT` | The resource name before a known Azure suffix, and `AccountName=` in connection strings | Reversible |
-| 10 | Custom terms (always on) | Your label, or `TERM` | Exact terms from the Custom terms box, longest first, whole-word | Reversible |
-| 11 | Domain SIDs | `DOMAIN_SID` | The domain part of `S-1-5-21-a-b-c`, keeping the RID | Reversible |
-| 12 | MAC addresses | `MAC` | `aa:bb:cc:dd:ee:ff` / `aa-bb-…` (skips all-zero and broadcast) | Reversible |
-| 13 | IP addresses | `PRIVATE_IP`, `PUBLIC_IP` | IPv4 (including defanged `[.]` and `(.)`) and IPv6; skips loopback, `0.0.0.0` and broadcast | Reversible |
-| 14 | Re-masking (always on) | The value's existing label | Any user, NETBIOS domain, person or host already in the session store, wherever it appears as a whole word (machine-account `$` and sentence punctuation kept outside). Follows the toggle of the original group | Reversible |
+| 11 | Entities (always on) | Your label (`ORG`, `HOST`, `PROJECT`, `OTHER`…), `PERSON_USER`, `PERSON_FIRST`, `PERSON_LAST`, or `TERM` | Other entity types' whole terms; then listed people's username forms, then a capitalised first or last name alone. See [Entities](#entities) | Reversible |
+| 12 | Domain SIDs | `DOMAIN_SID` | The domain part of `S-1-5-21-a-b-c`, keeping the RID | Reversible |
+| 13 | MAC addresses | `MAC` | `aa:bb:cc:dd:ee:ff` / `aa-bb-…` (skips all-zero and broadcast) | Reversible |
+| 14 | IP addresses | `PRIVATE_IP`, `PUBLIC_IP` | IPv4 (including defanged `[.]` and `(.)`) and IPv6; skips loopback, `0.0.0.0` and broadcast | Reversible |
+| 15 | Re-masking (always on) | The value's existing label | Any user, NETBIOS domain, person or host already in the session store (except entity tokens), wherever it appears as a whole word (machine-account `$` and sentence punctuation kept outside). Follows the toggle of the original group | Reversible |
 
 **Skipped on purpose:** `NT AUTHORITY`, `BUILTIN`, `NT SERVICE` and other well-known domains; registry hives (`HKLM`, `HKCU`…); built-in and default accounts (`SYSTEM`, `Administrator`, `Guest`, `krbtgt`, `root`, `admin`, `sa`, `www-data`, `Public`, `Default`…); empty field values (`-`, `N/A`) and log levels (`INFO`, `ERROR`); values such as `true`, `null`, `none`, `redacted`, `****`; variables and placeholders (`$pw`, `%PW%`, `*`, `<password>`, `{{pw}}`); anything in the never-mask list.
 
@@ -227,18 +261,20 @@ As a backstop, the raw text and reply boxes and both rendered outputs are cleare
 
 ## Limits
 
-- **Pattern matching misses things.** Names in free text, unusual password formats, and identifiers with no recognisable shape or keyword pass through. Always read the masked output before pasting it. Add misses to Custom terms.
+- **Pattern matching misses things.** Names in free text, unusual password formats, and identifiers with no recognisable shape or keyword pass through. Always read the masked output before pasting it. Add misses as entities.
 - **Tokens still carry information.** Labels reveal the type and the counters reveal how many distinct values there were. Consistent tokens reveal which events share a value. Kept structure (RIDs, last four card digits, cloud suffixes) is visible by design.
 - **Options reduce masking.** "Keep email domain" and "Keep public IPs" deliberately leave those values in the clear.
 - **The hash is not a secret.** A 32-bit hash of a short one-way value could be brute-forced by someone who can read the tab's memory. It never leaves the page.
 - **The CSP doesn't cover everything.** It doesn't stop browser extensions from reading the page, other apps from reading the clipboard, or a user from following a link. The page contains no links for that reason.
 - **Opt-outs are requests.** The field attributes are honoured by browsers and the named extensions, but an extension can ignore them. Use a browser profile without such extensions for sensitive text.
+- **Listed names match capitalised words.** A first or last name on its own is masked whenever it appears capitalised, so a listed person called May, Will or Mark is also masked as the capitalised word at the start of a sentence ("Will this work?"). Lowercase uses (`will`, `grace period`) are left alone. Full-name variants with an initial (`J. Doe`) can also catch a different person with the same initial and surname.
+- **Entity tokens reveal more structure.** Linked tokens show that `[PERSON_FIRST_1]` and `[PERSON_USER_1]` are the same person, and sub-indexes show how many spellings were seen.
 - **Cues can be wrong.** Field and keyword cues assume the value after `user=` is a user and the value after `Display Name:` is a person. An app name in a `DisplayName` field becomes a `PERSON` token, and an ordinary word that happens to equal a known username elsewhere is re-masked.
 - **Learned domains hide destinations.** If the text contains an address at a domain, every URL and host under that domain is masked too. Turn on *Keep email domain* when those destinations matter.
 - **Restore trusts token shapes.** Any token form in the reply that matches a stored token is replaced, even if the AI used it to mean something else.
 
 ## Tests
 
-- `node tests/run.js` loads only the engine block into a Node VM with no DOM (`tests/page.js`) and drives `PM` directly, with a fresh engine per case. It runs the masking cases in `tests/cases.js` (leak and keep checks), restore checks (including the `unknown` and `oneWay` lists and the report built from them), span positions, mapping rows, session reuse, the built-in sample round trip and timing on worst-case inputs. It also checks the whole file statically: hardened text fields, the CSP, the theme-only storage rule, no other storage, network, HTML injection, links or forms, no page access from the engine, and the `pagehide` handler. Cases marked `todo` are known gaps. They are listed with `--gaps`, and the run fails if one starts passing so its `todo` gets removed.
-- `node tests/ui.js` opens the page in headless Chromium with Playwright and goes through it end to end: the sample, highlighted tokens, plain-text copies equal to the engine's output (including a hand-made selection), hover, click, Shift-click and keyboard on tokens, Hide values, the mapping filter, the settings drawer and a toggle, shortcuts, restore of a reformatted reply and its report, `pagehide`, End session, the theme persisting with only the allowed key, a 390 px phone layout without horizontal scrolling, timing for 1.5 MB inputs, and no console errors or network requests. Without the `playwright` package it prints "skipped" and exits 0. CI installs it after the dependency-free steps.
+- `node tests/run.js` loads only the engine block into a Node VM with no DOM (`tests/page.js`) and drives `PM` directly, with a fresh engine per case. It runs the masking cases in `tests/cases.js` (leak and keep checks, including every entity form, routing and false-positive bait), restore checks, entity checks (an exact round trip, sub-indexed and reformatted tokens, unknown sub-indexes, numbering, match counts) (including the `unknown` and `oneWay` lists and the report built from them), span positions, mapping rows, session reuse, the built-in sample round trip and timing on worst-case inputs. It also checks the whole file statically: hardened text fields, the CSP, the theme-only storage rule, no other storage, network, HTML injection, links or forms, no page access from the engine, and the `pagehide` handler. Cases marked `todo` are known gaps. They are listed with `--gaps`, and the run fails if one starts passing so its `todo` gets removed.
+- `node tests/ui.js` opens the page in headless Chromium with Playwright and goes through it end to end: the sample, highlighted tokens, plain-text copies equal to the engine's output (including a hand-made selection), hover, click, Shift-click and keyboard on tokens, Hide values, the mapping filter, the settings drawer and a toggle, shortcuts, restore of a reformatted reply and its report, `pagehide`, End session, the theme persisting with only the allowed key, the Entities strip (add, duplicate, remove, chips and counts, Settings sync, Hide values on chips), select-to-add in the raw text and in the output, a 390 px phone layout without horizontal scrolling, timing for 1.5 MB inputs, and no console errors or network requests. Without the `playwright` package it prints "skipped" and exits 0. CI installs it after the dependency-free steps.
 - `node tests/public-safety.js` keeps real-looking data out of the repo: unknown GUIDs, non-example email domains, public IPs outside documentation ranges, and terms from a private, git-ignored `.public-safety-denylist`.

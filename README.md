@@ -36,9 +36,24 @@ Masked:  Account [NETBIOS_1]\[USER_1] logged on to [HOST_1] from [PRIVATE_IP_1]
 | People and accounts | Emails and UPNs, `DOMAIN\user`, profile paths, usernames in commands, account and display-name fields in logs (Windows events, JSON, key=value, syslog, mail headers), names after a title, phone numbers, account numbers after a keyword | Yes |
 | Machines and networks | Hostnames under your internal domains or the domains of masked emails, host fields in logs, `DESKTOP-`-style names, UNC hosts, machine accounts (`[HOST_1]$`), Azure resource names, IPv4/IPv6 (including defanged), MAC addresses | Yes |
 | Identifiers | GUIDs, domain SIDs (the RID is kept) | Yes |
-| Your own terms | Anything you list under **Custom terms**, with an optional label: `Acme Ltd \| ORG` | Yes |
+| Your entities | Names and terms you list as **Entities**, with linked tokens for a person's name forms (see below) | Yes |
 
 Once a user, host or name has a token, it gets the same token wherever else it appears in the session. Well-known values are left alone: `NT AUTHORITY\SYSTEM`, `BUILTIN`, registry hives, built-in accounts such as `Administrator` and `root`, loopback addresses, file paths, version numbers, hashes and timestamps.
+
+## Entities
+
+List the names and terms you consider sensitive in the **Entities** strip on the Mask tab: type one, pick a type (Person, Organisation, Host, Project, Other) and press **Add**. You can also select text in the raw box, or text the masked output left unmasked, and press **Add as entity**. Adding or removing an entity re-masks.
+
+A person gets linked tokens that share one number, so the AI can tell they are the same person:
+
+```text
+Jane Doe, Doe, Jane, J. Doe   ->  [PERSON_1], [PERSON_1.2], [PERSON_1.3]
+Jane (capitalised only)       ->  [PERSON_FIRST_1]
+Doe (capitalised only)        ->  [PERSON_LAST_1]
+jdoe, jane.doe, CORP\jdoe     ->  [PERSON_USER_1], [PERSON_USER_1.2], [NETBIOS_1]\[PERSON_USER_1]
+```
+
+Each different spelling gets its own sub-index (`.2`, `.3`), so Restore puts back exactly what was there. Other types match the whole term only. "grace period" or "will" stay as they are; a capitalised "Will" at the start of a sentence is masked if a listed person is called Will. The list is the same as **Custom terms** in Settings (`Jane Doe | PERSON`, one per line). It is kept for the tab, also after **End session**; to preload entities, edit `DEFAULT_TERMS` in your copy of the file.
 
 ## Settings and shortcuts
 
@@ -47,6 +62,7 @@ Open **Settings** (or press S) for a drawer with these options. Changes apply th
 - **Per-type toggles** turn each detector on or off, grouped by the same colours as the tokens.
 - **Keep email domain** masks only the name part of an email, and leaves that domain visible elsewhere.
 - **Keep public IPs** leaves public addresses visible.
+- **Custom terms** is the entity list as text, for editing many at once.
 - **Internal domains** turns any host under them into `HOST_n`.
 - **Never mask** lists exact values to leave alone.
 - To preload your own terms, domains or never-mask values, edit `DEFAULT_TERMS`, `DEFAULT_INTERNAL_DOMAINS` and `DEFAULT_NEVER_MASK` at the top of the engine script in your copy of the file.
@@ -61,7 +77,7 @@ Keys: Ctrl/⌘+Enter runs the current tab, M and R switch tabs, S opens settings
 - One-way values are never stored, so they can't be restored or recovered.
 - Text boxes ask the browser not to save, spell-check, translate or autocorrect their contents, and opt out of grammar extensions that upload text. They and both outputs are cleared when the tab closes.
 
-Masking is pattern-based, so it **will** miss things: names in free text, unusual password formats, identifiers it has no pattern for. Always read the masked output before you paste it, and add anything it missed to Custom terms. Masking reduces risk; it doesn't replace the data-handling rules that apply to you.
+Masking is pattern-based, so it **will** miss things: names in free text, unusual password formats, identifiers it has no pattern for. Always read the masked output before you paste it, and add anything it missed as an entity. Masking reduces risk; it doesn't replace the data-handling rules that apply to you.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it works, the full detector list and the exact guarantees.
 

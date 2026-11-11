@@ -154,6 +154,88 @@ async function main(){
     await page.keyboard.press('Escape');
     await page.click('#maskBtn');
 
+    // ---------- Entities strip, chips, select-to-add ----------
+    const chips = () => page.locator('#entChips li').count();
+    const maskedText = () => page.textContent('#masked');
+    const toasts = [];
+    const noteToast = async () => toasts.push(await toastText(page));
+    check('the sample lists its entities as chips with match counts', (await chips()) === 2 && /[1-9]\d*×/.test(await page.locator('#entChips li', { hasText: 'Jane Doe' }).textContent()));
+    check('a listed person gets linked tokens', /\[PERSON_FIRST_1\]/.test(await maskedText()) && /\[PERSON_USER_1\]/.test(await maskedText()));
+    check('the mapping names the entity form', (await page.textContent('#mapBody')).includes('Identity · first name'));
+    check('Grace is not masked before it is listed', (await maskedText()).includes('Grace'));
+    await page.fill('#entInput', 'Grace');
+    await page.click('#entAdd');
+    await noteToast();
+    check('adding an entity re-masks and adds a chip', (await chips()) === 3 && !(await maskedText()).includes('Grace') && (await page.inputValue('#terms')).includes('Grace | PERSON') && (await page.inputValue('#entInput')) === '');
+    await page.fill('#entInput', 'grace');
+    await page.click('#entAdd');
+    await noteToast();
+    check('a duplicate entity is refused', (await chips()) === 3 && toasts[toasts.length - 1] === 'That entity is already in the list.');
+    await page.locator('#entChips li', { hasText: 'Grace' }).locator('.chip-x').click();
+    await noteToast();
+    check('removing a chip re-masks without it', (await chips()) === 2 && (await maskedText()).includes('Grace') && !(await page.inputValue('#terms')).includes('Grace'));
+
+    // Select an unmasked name in the output.
+    const selectInOutput = word => page.evaluate(w => {
+      const box = document.getElementById('masked');
+      const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+      let n;
+      while ((n = walker.nextNode())) {
+        const i = n.data.indexOf(w);
+        if (i >= 0 && !n.parentElement.closest('.tk')){
+          const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + w.length);
+          const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+          const b = r.getBoundingClientRect();
+          box.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: b.left, clientY: b.bottom }));
+          return true;
+        }
+      }
+      return false;
+    }, word);
+    check('selecting unmasked text in the output offers "Add as entity"', (await selectInOutput('Grace')) && await page.waitForSelector('#selAdd:not([hidden])', { timeout: 1000 }).then(() => true, () => false));
+    check('the select-to-add control never shows the selected text', !(await page.textContent('#selAdd')).includes('Grace'));
+    await page.selectOption('#selType', 'PERSON');
+    await page.click('#selAddBtn');
+    await noteToast();
+    check('adding from the output masks it', (await chips()) === 3 && !(await maskedText()).includes('Grace') && await page.isHidden('#selAdd'));
+    await page.locator('#entChips li', { hasText: 'Grace' }).locator('.chip-x').click();
+    await page.evaluate(() => {
+      const box = document.getElementById('masked'), tok = box.querySelector('.tk');
+      const r = document.createRange(); r.setStartBefore(tok); r.setEndAfter(tok.nextSibling || tok);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      box.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 300, clientY: 300 }));
+    });
+    await page.waitForTimeout(50);
+    check('a selection that touches a token offers nothing', await page.isHidden('#selAdd'));
+    await page.evaluate(() => getSelection().removeAllRanges());
+
+    // Select a name in the raw text.
+    await page.evaluate(() => {
+      const ta = document.getElementById('input'), i = ta.value.indexOf('Grace');
+      ta.focus({ preventScroll: true }); ta.setSelectionRange(i, i + 5);
+      const b = ta.getBoundingClientRect();
+      ta.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: b.left + 40, clientY: b.top + 60 }));
+    });
+    check('selecting text in the raw box offers "Add as entity"', await page.waitForSelector('#selAdd:not([hidden])', { timeout: 1000 }).then(() => true, () => false));
+    await page.selectOption('#selType', 'OTHER');
+    await page.click('#selAddBtn');
+    await noteToast();
+    check('adding from the raw text masks it with the chosen type', !(await maskedText()).includes('Grace') && (await page.inputValue('#terms')).includes('Grace | OTHER') && /\[OTHER_1\]/.test(await maskedText()));
+
+    // The Settings box is the same list.
+    await page.click('#settingsBtn');
+    await page.fill('#terms', (await page.inputValue('#terms')).replace('Grace | OTHER', 'Northwind | ORG'));
+    await page.click('#closeSettings');
+    const chipText = await page.textContent('#entChips');
+    check('editing Custom terms in Settings updates the chips', (await chips()) === 3 && chipText.includes('Northwind') && !chipText.includes('Grace'));
+    await page.click('#hideBtn');
+    check('Hide values hides chip text', (await page.locator('#entChips .chip-val').count()) === 0 && (await page.locator('#entChips .redact').count()) === 3 && !(await page.textContent('#entChips')).includes('Jane'));
+    await page.click('#hideBtn');
+    await page.locator('#entChips li', { hasText: 'Northwind' }).locator('.chip-x').click();
+    await noteToast();
+    check('entity toasts never contain the entity', toasts.length >= 5 && toasts.every(t => !/Grace|Northwind|Jane/.test(t)), toasts.join(' | '));
+    check('the entity list stays in sync after removal', (await chips()) === 2 && !(await page.inputValue('#terms')).includes('Northwind'));
+
     // ---------- Shortcuts panel and tabs ----------
     await page.mouse.click(5, 500);
     await page.keyboard.press('?');
@@ -206,6 +288,7 @@ async function main(){
     const ended = await page.evaluate(() => ({ size: PM.size(), input: document.getElementById('input').value, tokens: document.querySelectorAll('#masked .tk').length,
       learned: (PM.configure({}), PM.mask('portal.contoso.com').text) }));
     check('End session clears the mapping, learned domains and text', ended.size === 0 && !ended.input && !ended.tokens && ended.learned === 'portal.contoso.com', JSON.stringify(ended));
+    check('End session keeps the entity list', (await page.locator('#entChips li').count()) === 2);
 
     // ---------- Theme ----------
     const before = await page.evaluate(() => document.documentElement.dataset.theme || null);

@@ -100,6 +100,53 @@ for (const c of cases){
   else ok('sample round trip');
 }
 
+// ---- 4b. Entities: exact restore of every form, tolerant forms with sub-indexes, a full round trip ----
+{
+  const p = loadPage({ terms: ['Jane Doe | PERSON', 'Acme Ltd | ORG', 'NAS-01 | HOST'] });
+  const original = [
+    'Display Name: Jane Doe',
+    'Ticket from Doe, Jane (JANE DOE) about J. Doe and jane doe.',
+    'Jane said Doe was out; JANE confirmed.',
+    'Logons: CORP\\jdoe, C:\\Users\\jane.doe\\Desktop, net user doej /add, Account Name: janed',
+    'Mrs Doe and Dr Jane A. Doe signed for Acme Ltd and ACME LTD.',
+    'Device=NAS-01 and nas-01 rebooted. A grace period applies; we will see.',
+    'Links: https://jdoe.example.com/u/jdoe?owner=Jane%20Doe&id=jane.doe#Doe and \\\\fs01\\jdoe\\x and "/srv/Jane/x"',
+  ].join('\n');
+  const masked = p.mask(original);
+  const back = p.restore(masked);
+  const r = p.lastRestore();
+  back === original && !r.unknown.length && !r.oneWay.length
+    ? ok('entities: round trip restores the original exactly', masked) : fail('entities: round trip restores the original exactly', `unknown ${r.unknown}`, back);
+  const tokOf = v => (p.PM.rows().find(x => x.value === v) || {}).token;
+  const checks = [
+    ['sub-indexed, bracketed', `${tokOf('Doe, Jane')} and ${tokOf('JANE DOE')}`, 'Doe, Jane and JANE DOE'],
+    ['sub-indexed, reformatted', `[person ${tokOf('Doe, Jane').slice(8, -1)}] and \\[PERSON\\_${tokOf('JANE DOE').slice(8, -1)}\\]`, 'Doe, Jane and JANE DOE'],
+    ['multi-underscore labels, every tolerant form', `[person first 1], [Person-First-1], PERSON\\_FIRST\\_1, \\[PERSON\\_LAST\\_1\\], [person_user_1]`, 'Jane, Jane, Jane, Doe, jane.doe'],   // the profile path is found first, so jane.doe is [PERSON_USER_1]
+    ['bare token at a sentence end', 'Ask PERSON_USER_1. Then PERSON_LAST_1.', 'Ask jane.doe. Then Doe.'],
+    ['bare sub-indexed token', `See ${tokOf('doej').slice(1, -1)} now`, 'See doej now'],
+    ['[X_1.2] is not [X_1] then ".2"', `${tokOf('Jane Doe')}.2 vs ${tokOf('Doe, Jane')}`, 'Jane Doe.2 vs Doe, Jane'],
+    ['other entities', `${tokOf('ACME LTD')} / [org 1] / ${tokOf('nas-01')}`, 'ACME LTD / Acme Ltd / nas-01'],
+  ];
+  for (const [name, reply, want] of checks){
+    const out = p.restore(reply);
+    out === want ? ok('entities restore: ' + name, out) : fail('entities restore: ' + name, `expected "${want}"`, out);
+  }
+  const u = p.restore('[PERSON_1.99] and [PERSON_FIRST_7]');
+  const ur = p.lastRestore();
+  u === '[PERSON_1.99] and [PERSON_FIRST_7]' && JSON.stringify(ur.unknown) === '["[PERSON_1.99]","[PERSON_FIRST_7]"]'
+    ? ok('entities restore: unknown sub-indexes are reported') : fail('entities restore: unknown sub-indexes are reported', JSON.stringify(ur.unknown), u);
+  // Counts per entity, for the chips, and End session keeping the list (the list is settings, not mapping).
+  const m = p.PM.mask('Jane Doe and jdoe');
+  const key = 'PERSON|jane doe';
+  m.entities[key] === 2 ? ok('entities: match counts per entity') : fail('entities: match counts per entity', JSON.stringify(m.entities));
+  p.clear();
+  const again = p.PM.mask('Jane Doe');
+  again.text === '[PERSON_1]' && p.PM.size() === 1 ? ok('entities: End session clears tokens, not the list') : fail('entities: End session clears tokens, not the list', again.text);
+  const parsed = p.PM.parseTerms('Jane Doe | PERSON\n# note\nAcme Ltd\nx\nNAS-01 | host');
+  JSON.stringify(parsed.map(x => x.key)) === '["PERSON|jane doe","TERM|acme ltd","HOST|nas-01"]'
+    ? ok('entities: parseTerms reads the list as configure does') : fail('entities: parseTerms reads the list as configure does', JSON.stringify(parsed));
+}
+
 // ---- 5. Spans: where mask() and restore() say each token is, for highlighting ----
 {
   const p = loadPage();
@@ -110,11 +157,11 @@ for (const c of cases){
   for (const sp of m.spans){
     const shown = m.text.slice(sp.start, sp.end);
     if (sp.start < prev) problems.push(`overlapping or unordered span at ${sp.start}`);
-    if (!/^\[[A-Z][A-Z0-9_]*_\d+(?::\*{4}\d{4})?\]$/.test(shown) || !shown.startsWith(sp.token.slice(0, -1))) problems.push(`span ${sp.start}-${sp.end} shows "${shown}" for ${sp.token}`);
+    if (!/^\[[A-Z][A-Z0-9_]*_\d+(?:\.\d+)?(?::\*{4}\d{4})?\]$/.test(shown) || !shown.startsWith(sp.token.slice(0, -1))) problems.push(`span ${sp.start}-${sp.end} shows "${shown}" for ${sp.token}`);
     if (!p.PM.lookup(sp.token)) problems.push(`span token ${sp.token} is not in the mapping`);
     prev = sp.end;
   }
-  const inText = (m.text.match(/\[[A-Z][A-Z0-9_]*_\d+(?::\*{4}\d{4})?\]/g) || []).length;
+  const inText = (m.text.match(/\[[A-Z][A-Z0-9_]*_\d+(?:\.\d+)?(?::\*{4}\d{4})?\]/g) || []).length;
   if (m.spans.length !== inText) problems.push(`${m.spans.length} spans for ${inText} tokens in the text`);
   if (m.text !== output) problems.push('masking the same text twice gave different output');
   problems.length ? fail('mask spans match the text', problems.join('; ')) : ok('mask spans match the text', `${m.spans.length} spans`);
@@ -130,8 +177,8 @@ for (const c of cases){
   bad.length || kinds.size !== 3 ? fail('restore spans match the text', `${bad.length} wrong spans; kinds: ${[...kinds]}`) : ok('restore spans match the text', `${r.spans.length} spans`);
 
   const rows = p.PM.rows();
-  const user = rows.find(x => x.label === 'USER' && x.value === 'jdoe');
-  rows.every(x => x.oneWay === (x.value === null)) && user && user.seen >= 3
+  const user = rows.find(x => x.label === 'PERSON_USER' && x.value === 'jdoe');
+  rows.every(x => x.oneWay === (x.value === null)) && user && user.seen >= 3 && user.entity && user.part === 'USER'
     ? ok('mapping rows carry type, value and times seen') : fail('mapping rows carry type, value and times seen', JSON.stringify(user));
 }
 
@@ -141,10 +188,10 @@ for (const c of cases){
   const engine = scriptBlock('engine'), ui = scriptBlock('ui');
   const REQUIRED = ['autocomplete="off"', 'autocorrect="off"', 'autocapitalize="off"', 'spellcheck="false"', 'translate="no"',
     'writingsuggestions="false"', 'data-gramm="false"', 'data-gramm_editor="false"', 'data-enable-grammarly="false"', 'data-lt-active="false"', 'data-ms-editor="false"'];
-  const fields = html.match(/<(?:textarea|input)\b[^>]*>/g) || [];
-  const textFields = fields.filter(f => /^<textarea/.test(f) || /type="(?:text|search|password)"/.test(f) || !/type=/.test(f));
+  const fields = html.match(/<(?:textarea|input|select)\b[^>]*>/g) || [];
+  const textFields = fields.filter(f => /^<(?:textarea|select)/.test(f) || /type="(?:text|search|password)"/.test(f) || !/type=/.test(f));
   const missing = textFields.flatMap(f => REQUIRED.filter(a => !f.includes(a)).map(a => `${(f.match(/id="([^"]+)"/) || [])[1]} lacks ${a}`));
-  missing.length || !textFields.length ? fail('every text field is hardened', missing.join('; ') || 'no text fields found') : ok('every text field is hardened', `${textFields.length} fields`);
+  missing.length || !textFields.length ? fail('every text field and select is hardened', missing.join('; ') || 'no text fields found') : ok('every text field and select is hardened', `${textFields.length} fields`);
   /<html[^>]*\btranslate="no"/.test(html) && /<meta name="google" content="notranslate">/.test(html)
     ? ok('page opts out of translation') : fail('page opts out of translation', 'missing <html translate="no"> or the notranslate meta');
   const csp = (html.match(/Content-Security-Policy" content="([^"]+)"/) || [])[1] || '';

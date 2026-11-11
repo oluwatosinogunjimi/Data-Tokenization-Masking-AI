@@ -215,6 +215,37 @@ table.mt .act { text-align: right; white-space: nowrap; width: 1%; padding-top: 
   .filter input { width: 100%; max-width: none; flex: 1; }
 }
 
+/* ---------- entities strip and select-to-add ---------- */
+.ents { display: grid; gap: 10px; padding-bottom: 18px; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
+.ents-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.ents-toggle { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 15px; border-radius: var(--r); }
+.ents-toggle:focus-visible { outline: 2px solid var(--pen); outline-offset: 2px; }
+.ents-toggle .chev { transition: transform .12s; align-self: center; }
+.ents-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.ents-n { font-family: var(--font-mono); font-weight: 400; font-size: 13px; color: var(--muted); }
+.ents-hint { font-size: 13.5px; }
+.ents-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.ents-add { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ents-add input { width: 230px; max-width: 100%; min-height: 32px; padding: 4px 10px; font-size: 14px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--surface-2); }
+.ents-add input:focus { outline: none; border-color: var(--pen); box-shadow: 0 0 0 3px var(--pen-soft); background: var(--surface); }
+select { min-height: 32px; padding: 4px 8px; font-size: 14px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--surface); color: var(--ink); }
+.chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 2px 2px 8px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--surface); font-size: 14px; max-width: 100%; }
+.chip .sw { width: 12px; height: 9px; }
+.chip-val { font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
+.chip-type { font-size: 12.5px; color: var(--muted); }
+.chip-ct { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.chip-ct.zero { color: var(--inc); }
+.chip-x { all: unset; box-sizing: border-box; cursor: pointer; width: 26px; height: 26px; display: inline-grid; place-items: center; border-radius: var(--r); color: var(--ink-2); font-size: 17px; line-height: 1; border: 1.5px solid transparent; }
+.chip-x:hover { border-color: var(--line-strong); color: var(--ink); }
+.chip-x:focus-visible { outline: 2px solid var(--pen); outline-offset: 1px; }
+.redact.sm { width: 8ch; height: .95em; }
+.seladd { position: fixed; z-index: 76; display: flex; gap: 6px; align-items: center; padding: 6px; background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--r); box-shadow: 3px 3px 0 var(--line); }
+.seladd select { min-height: 30px; font-size: 13px; }
+.icon-btn.sm { width: 28px; height: 28px; }
+@media (max-width: 600px) { .ents-hint { display: none; } .ents-add { flex: 1 1 100%; } .ents-add input { flex: 1; width: auto; min-width: 0; } }
+
 /* ---------- token popover ---------- */
 .pv { position: fixed; z-index: 75; width: max-content; max-width: min(380px, calc(100vw - 24px)); background: var(--surface); color: var(--ink);
   border: 1px solid var(--line-strong); border-radius: var(--r); box-shadow: 3px 3px 0 var(--line); padding: 10px 12px; display: grid; gap: 6px; font-size: 13.5px;
@@ -318,6 +349,24 @@ footer { max-width: 1320px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 64px) 32
 
     <!-- ===== Step 1: Mask ===== -->
     <div class="sheet" role="tabpanel" id="panel-mask" aria-labelledby="tab-mask">
+      <div class="ents" role="group" aria-labelledby="entsToggle">
+        <div class="ents-head">
+          <button class="ents-toggle" type="button" id="entsToggle" aria-expanded="true" aria-controls="entsBody">
+            <svg class="i chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+            Entities <span class="ents-n" id="entsCount"></span>
+          </button>
+          <span class="quiet ents-hint">Names and terms to mask wherever they appear. A person's first name, last name and usernames get linked tokens.</span>
+        </div>
+        <div class="ents-body" id="entsBody">
+          <div class="ents-add">
+            <input autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="entInput" type="text" maxlength="100" placeholder="Add a name or term" aria-label="New entity">
+            <select autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="entType" aria-label="Entity type"><option value="PERSON">Person</option><option value="ORG">Organisation</option><option value="HOST">Host</option><option value="PROJECT">Project</option><option value="OTHER">Other</option></select>
+            <button class="btn sm" type="button" id="entAdd">Add</button>
+          </div>
+          <ul class="chips" id="entChips" aria-label="Entities" hidden></ul>
+          <p class="quiet" id="entsEmpty">None yet. Add one here, or select text in the raw or masked text.</p>
+        </div>
+      </div>
       <div class="work">
         <div class="pane">
           <div class="pane-head">
@@ -402,7 +451,7 @@ footer { max-width: 1320px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 64px) 32
     </div>
     <div class="tbl-wrap">
       <table class="mt">
-        <thead><tr><th scope="col">Token</th><th scope="col">Type</th><th scope="col">Real value</th><th scope="col" class="num">Seen</th><th scope="col" class="act"><span class="sr-only">Copy</span></th></tr></thead>
+        <thead><tr><th scope="col">Token</th><th scope="col">Type</th><th scope="col">Real value</th><th scope="col" class="num" title="Times in the last Mask">Seen</th><th scope="col" class="act"><span class="sr-only">Copy</span></th></tr></thead>
         <tbody id="mapBody"></tbody>
       </table>
     </div>
@@ -456,8 +505,8 @@ footer { max-width: 1320px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 64px) 32
       <p class="fixed-note">Custom terms, internal domains and domains learned from masked emails are always masked.</p>
     </fieldset>
     <div class="lists">
-      <label><span class="lt">Custom terms</span><span class="hint">One per line. Optional label: <code>Acme Ltd | ORG</code></span>
-        <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="terms" placeholder="Acme Ltd | ORG&#10;NAS-01 | HOST&#10;Jane Doe | PERSON"></textarea></label>
+      <label><span class="lt">Custom terms</span><span class="hint">The entity list, one per line: <code>Jane Doe | PERSON</code>. Types: PERSON, ORG, HOST, PROJECT, OTHER, or a label of your own.</span>
+        <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="terms" placeholder="Jane Doe | PERSON&#10;Acme Ltd | ORG&#10;NAS-01 | HOST"></textarea></label>
       <label><span class="lt">Internal domains</span><span class="hint">Any host under these becomes HOST_n.</span>
         <textarea autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="domains" placeholder="corp.example.com&#10;example.local"></textarea></label>
       <label><span class="lt">Never mask</span><span class="hint">Exact values to leave as they are.</span>
@@ -465,7 +514,7 @@ footer { max-width: 1320px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 64px) 32
     </div>
     <div class="advice">
       <strong>Read the masked output before pasting.</strong>
-      <span>Pattern matching misses things: names in free text, unusual password formats, IDs only you would recognise. Add anything it missed to Custom terms.
+      <span>Pattern matching misses things: names in free text, unusual password formats, IDs only you would recognise. Add anything it missed as an entity.
       Masking reduces risk; it doesn't replace the data-handling rules that apply to you.</span>
     </div>
   </div>
@@ -502,6 +551,12 @@ footer { max-width: 1320px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 64px) 32
 </dialog>
 
 <template id="tplCopy"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></template>
+<!-- Select-to-add: appears next to a selection in the raw text or the unmasked part of the output -->
+<div class="seladd" id="selAdd" role="group" aria-label="Add the selected text as an entity" hidden>
+  <select autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="selType" aria-label="Entity type"><option value="PERSON">Person</option><option value="ORG">Organisation</option><option value="HOST">Host</option><option value="PROJECT">Project</option><option value="OTHER">Other</option></select>
+  <button class="btn sm primary" type="button" id="selAddBtn">Add as entity</button>
+  <button class="icon-btn sm" type="button" id="selClose" aria-label="Close"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+</div>
 <div class="pv" id="pv" role="tooltip" hidden></div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -519,8 +574,10 @@ const DEFAULT_NEVER_MASK = [];
 // The masking engine. It never touches the page: the interface script below reaches it only through the
 // PM object at the end of this block, and the tests load this block on its own.
 const GROUPS = ['secrets', 'cards', 'bvn', 'account', 'phones', 'emails', 'users', 'hosts', 'guids', 'sids', 'macs', 'ips'];
-const S = { fwd: new Map(), rev: new Map(), cnt: {}, rows: [], byToken: new Map(), learned: new Set() };
-let PH = [], RUN = { counts: {} }, CFG = { on: {} }, ALLOW = new Set();
+// entNum: entity -> its number; sub: "LABEL_n" -> surface forms numbered so far; entTokens: tokens owned by entities.
+const S = { fwd: new Map(), rev: new Map(), cnt: {}, rows: [], byToken: new Map(), learned: new Set(),
+  entNum: new Map(), sub: new Map(), entTokens: new Set() };
+let PH = [], RUN = { counts: {}, ent: {}, seen: new Map() }, CFG = { on: {} }, ALLOW = new Set();   // RUN: the last Mask only
 
 const WELL_KNOWN_DOMAINS = new Set(['nt authority','authority','builtin','nt service','service','window manager',
   'font driver host','workgroup','hklm','hkcu','hkcr','hku','hkcc','hkey_local_machine','hkey_current_user',
@@ -558,9 +615,11 @@ function fnv(s){ let h = 0x811c9dc5; for (let i = 0; i < s.length; i++){ h ^= s.
 function luhn(d){ let s = 0, alt = false; for (let i = d.length - 1; i >= 0; i--){ let n = +d[i]; if (alt){ n *= 2; if (n > 9) n -= 9; } s += n; alt = !alt; } return s % 10 === 0; }
 
 // Same value -> same token for the whole session, so correlation still works.
+// A value that is one of the forms of a listed entity gets that entity's token instead (see routeEntity).
 function mk(label, value, o = {}){
   const norm = o.norm !== undefined ? o.norm : value.toLowerCase();
   if (ALLOW.has(value.toLowerCase()) || ALLOW.has(norm)) return value;
+  if (!o.oneWay && ENT.list.length){ const r = routeEntity(label, value); if (r !== null) return r; }
   const key = label + '|' + (o.oneWay ? '#' + fnv(norm) : norm);
   let t = S.fwd.get(key);
   if (!t){
@@ -572,8 +631,215 @@ function mk(label, value, o = {}){
     if (!o.oneWay) S.rev.set(t, value);
   }
   S.byToken.get(t).seen++;
+  RUN.seen.set(t, (RUN.seen.get(t) || 0) + 1);
   RUN.counts[label] = (RUN.counts[label] || 0) + 1;
   return place(o.suffix ? t.slice(0, -1) + o.suffix + ']' : t);
+}
+
+// ---- Entities: the custom-terms list ("term | TYPE"), matched in every form, each form with a linked token ----
+// One number per entity, shared by all its forms: Jane Doe is [PERSON_1], "Jane" alone [PERSON_FIRST_1], "Doe" alone
+// [PERSON_LAST_1], "jdoe" [PERSON_USER_1]. Within one label and number, each distinct surface string gets its own
+// sub-index ([PERSON_1] "Jane Doe", [PERSON_1.2] "Doe, Jane"), so restore puts back exactly the text that was there.
+let ENT = { list: [], persons: [] };
+const WC = '\\p{L}\\p{N}_';                 // word characters in any script
+const PUA_C = '\\uE000-\\uE0FF';             // placeholders: never part of an entity match
+// Case-insensitive without the i flag, so other parts of a pattern can still insist on a capital letter.
+const ci = s => [...s].map(c => { const u = c.toUpperCase(), l = c.toLowerCase(); return u !== l && u.length === 1 && l.length === 1 ? '[' + u + l + ']' : esc(c); }).join('');
+// "Capitalised" means the first letter is upper case: Grace, GRACE and McDonald, not grace.
+const isCap = s => { const c = s.charAt(0); return c !== c.toLowerCase() && c === c.toUpperCase(); };
+const MID_WORD = '\\p{Lu}[\\p{L}\'’-]*\\.?';    // a capitalised middle name or initial: Alice, A.
+// A name part on its own: not inside a word, email or token. A whole path segment (/Jane/, \\Jane\\) counts.
+const PART_B = `(?<![${WC}${PUA_C}.@\\-]|[${WC}]['’])`;
+const PART_A = `(?![${WC}${PUA_C}@]|[.\\-][${WC}])`;
+const USER_B = `(?<![${WC}${PUA_C}.@%+\\-])`;                 // a username: a whole identifier
+const USER_A = `(?![${WC}${PUA_C}@]|[\\-+][${WC}])`;   // a following ".name" is checked in the callback: hostname yes, file name no
+
+function parseTerms(src){
+  return lines(src).map(l => l.trim()).filter(l => l && !l.startsWith('#')).map(l => {
+    const i = l.lastIndexOf('|');
+    let term = l, label = 'TERM';
+    if (i > 0){
+      term = l.slice(0, i).trim();
+      label = l.slice(i + 1).trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_') || 'TERM';
+      if (/^[^A-Z]/.test(label)) label = 'T_' + label;
+    }
+    return { term, label, key: label + '|' + term.toLowerCase().replace(/\s+/g, ' ') };
+  }).filter(x => x.term.length > 1);
+}
+
+function buildEntities(){
+  const list = [], seen = new Set();
+  for (const { term, label, key } of CFG.terms){
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const words = term.split(/\s+/);
+    const e = { key, term, label, norm: key.slice(key.indexOf('|') + 1), person: label === 'PERSON' };
+    if (!e.person){
+      // Other entities match the whole term only, whatever its case or spacing.
+      e.fullRe = new RegExp('(?<![A-Za-z0-9])' + words.map(esc).join('[ \\t]+') + '(?![A-Za-z0-9])', 'gi');
+    } else if (words.length === 1){
+      // A one-word name is its own full name, and like a first name it only counts when capitalised.
+      e.single = true;
+      e.fullRe = new RegExp(`${PART_B}${ci(term)}${PART_A}`, 'gu');
+      e.anchored = new RegExp(`^${ci(term)}$`, 'u');
+    } else {
+      const first = words[0], last = words[words.length - 1];
+      const MID = `(?:${[...words.slice(1, -1).map(ci), MID_WORD].join('|')})`;
+      const forms = [
+        `${ci(first)}(?:[ \\t]+${MID}){0,2}[ \\t]+${ci(last)}`,           // Jane Doe, jane doe, Jane A. Doe, Jane Alice Doe
+        `${ci(last)},[ \\t]*${ci(first)}(?:[ \\t]+${MID}){0,2}`,          // Doe, Jane   DOE, Jane
+        `${esc(first.charAt(0).toUpperCase())}\\.?(?:[ \\t]+${MID})?[ \\t]+${ci(last)}`,   // J. Doe   J Doe
+      ].join('|');
+      e.fullRe = new RegExp(`(?<![${WC}${PUA_C}])(?:${forms})(?![${WC}${PUA_C}@])`, 'gu');
+      e.anchored = new RegExp(`^(?:${forms})$`, 'u');
+      e.first = first.length >= 2 ? first.toLowerCase() : null;
+      e.last = last.length >= 2 && last.toLowerCase() !== e.first ? last.toLowerCase() : null;
+      const alts = [e.first && `(${ci(first)})`, e.last && `(${ci(last)})`].filter(Boolean);
+      if (alts.length) e.partRe = new RegExp(`${PART_B}(?:${alts.join('|')})${PART_A}`, 'gu');
+      // Username forms: first.last firstlast first_last first-last flast f.last lastf last.first firstl
+      const f = first.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''), l = last.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+      if (f && l){
+        e.users = new Set([`${f}.${l}`, `${f}${l}`, `${f}_${l}`, `${f}-${l}`, f[0] + l, `${f[0]}.${l}`, l + f[0], `${l}.${f}`, f + l[0]].filter(x => x.length >= 4));
+        const u = [...e.users].sort((a, b) => b.length - a.length).map(esc);
+        if (u.length) e.userRe = new RegExp(`${USER_B}(?:${u.join('|')})${USER_A}`, 'giu');
+      }
+    }
+    list.push(e);
+  }
+  ENT = { list, persons: list.filter(e => e.person && !e.single) };
+}
+
+// Which entity form a whole string is, if any: { e, part } or null.
+function formOf(v){
+  const low = v.toLowerCase().replace(/\s+/g, ' ');
+  for (const e of ENT.list){
+    if (e.single){ if (low === e.norm && isCap(v)) return { e, part: '' }; }
+    else if (low === e.norm || (e.anchored && e.anchored.test(v))) return { e, part: '' };
+  }
+  for (const e of ENT.persons){
+    if (e.users && e.users.has(low)) return { e, part: 'USER' };
+    if (isCap(v) && low === e.first) return { e, part: 'FIRST' };
+    if (isCap(v) && low === e.last) return { e, part: 'LAST' };
+  }
+  return null;
+}
+
+// URLs: a host label, path segment, query key or value, fragment or user name that is wholly an entity form is
+// masked (percent-encoded too: /people/Jane%20Doe). The token stands for the text exactly as written in the URL.
+// Partial matches stay: /xjdoe/, /jdoe2/, /jdoe.png.
+const URL_RE = /\b[a-z][a-z0-9+.-]{0,15}:\/\/[^\s"'<>`]+/gi;
+function urlPart(raw, plusIsSpace){
+  if (!raw || /[\uE000-\uE0FF]/.test(raw)) return raw;
+  let v = raw;
+  try { v = decodeURIComponent(plusIsSpace ? raw.replace(/\+/g, ' ') : raw); } catch (e) { /* not encoded */ }
+  const f = formOf(v);
+  return f ? entityTok(f.e, f.part, raw) : raw;
+}
+const urlParams = q => q.split(/([&;])/).map(x => {
+  if (x === '&' || x === ';') return x;
+  const i = x.indexOf('=');
+  return i < 0 ? urlPart(x, true) : urlPart(x.slice(0, i), true) + '=' + urlPart(x.slice(i + 1), true);
+}).join('');
+function urlHost(host){
+  const L = host.split('.'), out = [];
+  for (let i = 0; i < L.length; i++){
+    // Two labels can make one form (jane.doe.example.com); the top-level domain is never a form.
+    if (i + 2 < L.length){ const two = L[i] + '.' + L[i + 1], f = /[\uE000-\uE0FF]/.test(two) ? null : formOf(two); if (f){ out.push(entityTok(f.e, f.part, two)); i++; continue; } }
+    out.push(L.length === 1 || i < L.length - 1 ? urlPart(L[i]) : L[i]);
+  }
+  return out.join('.');
+}
+function maskUrl(u){
+  const tail = (u.match(/[.,;:!?)\]}]+$/) || [''])[0];
+  const m = u.slice(0, u.length - tail.length).match(/^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/i);
+  if (!m) return u;
+  const [, scheme, auth, path, query, frag] = m;
+  const at = auth.lastIndexOf('@');
+  const user = at < 0 ? '' : auth.slice(0, at).replace(/^[^:]+/, x => urlPart(x)) + '@';
+  const hp = auth.slice(at + 1).match(/^([^:]*)(.*)$/);
+  return scheme + user + urlHost(hp[1]) + hp[2] + path.split('/').map(seg => urlPart(seg)).join('/') +
+    (query ? '?' + urlParams(query.slice(1)) : '') + (frag ? '#' + urlParams(frag.slice(1)) : '') + tail;
+}
+// A username form followed by ".something": masked when that makes a hostname (jdoe.corp.example.com),
+// left alone when it makes a file name (jdoe.txt, jdoe.tar.gz) or the match is the start of a longer name.
+function userFormEnds(all, end){
+  if (all[end] !== '.' || !/[\p{L}\p{N}_]/u.test(all[end + 1] || '')) return true;
+  const labels = all.slice(end).match(/^(?:\.[A-Za-z0-9-]+)+/)[0].slice(1).split('.');
+  const last = labels[labels.length - 1];
+  if (labels.length === 1) return INTERNAL_TLD.test(last);   // jdoe.corp, jdoe.local; jdoe.png is a file
+  return /^[a-z]{2,24}$/i.test(last) && !FILE_LIKE.test(last) && (!FILE_EXT.test('.' + last) || /^com$/i.test(last));
+}
+const INTERNAL_TLD = /^(?:local|lan|corp|internal|intranet|home|localdomain)$/i;
+const FILE_LIKE = /^(?:png|jpe?g|gif|bmp|svg|webp|ico|tiff?|heic|mp[34]|wav|avi|mov|mkv|md|bak|old|orig|sql|css|ts|go|rb|java|cpp|cs|pl|lock|pub|asc|gpg|out|err|gz|bz2|xz|tgz)$/i;
+
+// The entity's number, allocated on first use of any of its forms. A plain token already made for the same value
+// (a Display Name field seen before the entity was listed) keeps its number, so the two stay linked.
+function entityNum(e){
+  let n = S.entNum.get(e.key);
+  if (n === undefined){
+    const old = S.fwd.get(e.label + '|' + e.norm);
+    if (old) n = +old.slice(old.lastIndexOf('_') + 1, -1);
+    else { S.cnt[e.label] = (S.cnt[e.label] || 0) + 1; n = S.cnt[e.label]; }
+    S.entNum.set(e.key, n);
+  }
+  return n;
+}
+
+// part: '' (the full name or term), 'FIRST', 'LAST' or 'USER'.
+function entityTok(e, part, surface){
+  if (ALLOW.has(surface.toLowerCase())) return surface;
+  const n = entityNum(e);
+  const label = part ? e.label + '_' + part : e.label;
+  const base = label + '_' + n;
+  const fkey = '=' + base + '|' + surface;
+  let t = S.fwd.get(fkey);
+  if (!t){
+    let k = S.sub.get(base) || 0;
+    const plain = '[' + base + ']';
+    if (!k && S.rev.has(plain)){   // the plain token is this entity's first surface form
+      k = 1;
+      S.fwd.set('=' + base + '|' + S.rev.get(plain), plain);
+      Object.assign(S.byToken.get(plain), { entity: e.key, part });
+      S.entTokens.add(plain);
+      t = S.fwd.get(fkey);
+    }
+    if (!t){
+      k++;
+      t = '[' + base + (k > 1 ? '.' + k : '') + ']';
+      S.fwd.set(fkey, t);
+      const row = { token: t, label, orig: surface, seen: 0, entity: e.key, part };
+      S.rows.push(row); S.byToken.set(t, row); S.rev.set(t, surface);
+      S.entTokens.add(t);
+    }
+    S.sub.set(base, k);
+  }
+  S.byToken.get(t).seen++;
+  RUN.seen.set(t, (RUN.seen.get(t) || 0) + 1);
+  RUN.counts[label] = (RUN.counts[label] || 0) + 1;
+  RUN.ent[e.key] = (RUN.ent[e.key] || 0) + 1;
+  return place(t);
+}
+
+// Other detectors find many entity forms first (DOMAIN\jdoe, Account Name: jdoe, Display Name: Jane Doe, Mrs Doe,
+// the name part of an email when the domain is kept). mk() asks here whether the value belongs to an entity.
+function routeEntity(label, value){
+  const low = value.toLowerCase().replace(/\s+/g, ' ');
+  for (const e of ENT.list){
+    if (e.single){
+      if ((label === 'PERSON' || label === 'USER') && low === e.norm && isCap(value)) return entityTok(e, '', value);
+    } else if (label === e.label && (low === e.norm || (e.anchored && e.anchored.test(value)))) return entityTok(e, '', value);
+  }
+  if (label === 'HOST'){   // a host named like a listed person's username: \\jdoe\share
+    for (const e of ENT.persons) if (e.users && e.users.has(low)) return entityTok(e, 'USER', value);
+    return null;
+  }
+  if (label !== 'PERSON' && label !== 'USER') return null;
+  for (const e of ENT.persons){
+    if (label === 'USER' && e.users && e.users.has(low)) return entityTok(e, 'USER', value);
+    if (isCap(value) && low === e.first) return entityTok(e, 'FIRST', value);
+    if (isCap(value) && low === e.last) return entityTok(e, 'LAST', value);
+  }
+  return null;
 }
 
 function isPriv4(ip){
@@ -725,6 +991,7 @@ function propagate(t){
     const label = tok.slice(1, tok.lastIndexOf('_'));
     const g = PROPAGATE[label];
     const low = orig.toLowerCase();
+    if (S.entTokens.has(tok)) continue;   // the entity detector already finds every form of an entity
     if (!g || !CFG.on[g] || orig.length < 4 || /^\d+$/.test(orig) || PROP_STOP.has(low) || ALLOW.has(low)) continue;
     if (/\s/.test(orig)) multi.push([orig, label]); else if (!single.has(low)) single.set(low, [orig, label]);
   }
@@ -794,6 +1061,11 @@ const DETECTORS = [
       if (CFG.keepEmailDomain){ const i = m.lastIndexOf('@'); return mk('USER', m.slice(0, i)) + m.slice(i); }
       return mk('EMAIL', m);
     }) },
+  // Listed people, full-name forms first ("Dr Jane A. Doe" stays one name), before the account and name fields.
+  { g: 'entities', always: true, run: t => {
+      for (const e of ENT.list) if (e.person) t = t.replace(e.fullRe, m => e.single && !isCap(m) ? m : entityTok(e, '', m));
+      return t;
+    } },
   { g: 'users', run: t => t
     .replace(/([A-Za-z]:\\(?:Users|Documents and Settings)\\)([^\\\/\s"'<>|:\uE000-\uE0FF]+)/gi,
       (m, p, u) => SKIP_USERS.has(u.toLowerCase()) ? m : p + mk('USER', u))
@@ -837,11 +1109,13 @@ const DETECTORS = [
       t = t.replace(AZ_ACCOUNT, (m, k, name) => k + mk('AZ_STORAGE', name));
       return t.replace(/\b(?:DESKTOP|LAPTOP|WIN|SRV)-[A-Z0-9]{4,15}\b/gi, m => mk('HOST', m));
     } },
+  // The rest of the entities (the custom-terms list), always on: other entity types, then usernames, then a first or
+  // last name alone, with URL parts checked first. Forms that other detectors found first already carry the entity's token.
   { g: 'terms', always: true, run: t => {
-      for (const { term, label } of CFG.terms){
-        const re = new RegExp('(?<![A-Za-z0-9])' + esc(term) + '(?![A-Za-z0-9])', 'gi');
-        t = t.replace(re, m => mk(label, m, { norm: term.toLowerCase() }));
-      }
+      for (const e of ENT.list) if (!e.person) t = t.replace(e.fullRe, m => entityTok(e, '', m));
+      if (ENT.list.length) t = t.replace(URL_RE, maskUrl);
+      for (const e of ENT.persons) if (e.userRe) t = t.replace(e.userRe, (m, off, all) => userFormEnds(all, off + m.length) ? entityTok(e, 'USER', m) : m);
+      for (const e of ENT.persons) if (e.partRe) t = t.replace(e.partRe, (m, a) => isCap(m) ? entityTok(e, a !== undefined && e.first ? 'FIRST' : 'LAST', m) : m);
       return t;
     } },
   { g: 'sids', run: t => t.replace(/\bS-1-5-21-(\d+-\d+-\d+)(?=-\d+\b|\b)/g, (m, d) => 'S-1-5-21-' + mk('DOMAIN_SID', d)) },
@@ -878,19 +1152,11 @@ function configure(c = {}){
   for (const g of GROUPS) CFG.on[g] = !(c.on && c.on[g] === false);
   CFG.keepEmailDomain = !!c.keepEmailDomain;
   CFG.keepPublicIp = !!c.keepPublicIp;
-  CFG.terms = lines(c.terms).map(l => l.trim()).filter(l => l && !l.startsWith('#')).map(l => {
-    const i = l.lastIndexOf('|');
-    let term = l, label = 'TERM';
-    if (i > 0){
-      term = l.slice(0, i).trim();
-      label = l.slice(i + 1).trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_') || 'TERM';
-      if (/^[^A-Z]/.test(label)) label = 'T_' + label;
-    }
-    return { term, label };
-  }).filter(x => x.term.length > 1).sort((a, b) => b.term.length - a.term.length);
+  CFG.terms = parseTerms(c.terms).sort((a, b) => b.term.length - a.term.length);
   CFG.domains = lines(c.domains).join('\n').split(/[\s,]+/).map(s => s.trim().replace(/^\*?\./, ''))
     .filter(s => s.includes('.')).sort((a, b) => b.length - a.length);
   ALLOW = new Set(lines(c.allow).map(s => s.trim().toLowerCase()).filter(Boolean));
+  buildEntities();
 }
 
 // A card token carries its last four digits ([CARD_1:****1111]); the mapping knows it as [CARD_1].
@@ -899,7 +1165,7 @@ const baseToken = tok => { const i = tok.indexOf(':'); return i < 0 ? tok : tok.
 // Returns the masked text and where each token sits in it ({ start, end, token }), found while the
 // placeholders are expanded, so the page can highlight tokens without parsing the text again.
 function maskText(text){
-  PH = []; RUN = { counts: {} };
+  PH = []; RUN = { counts: {}, ent: {}, seen: new Map() };
   learnDomains(text);
   let t = text;
   for (const d of DETECTORS) if (d.always || CFG.on[d.g]) t = d.run(t);
@@ -923,7 +1189,7 @@ const ZW = '[\\u200B-\\u200D\\u2060\\uFEFF]*';
 function restoreText(text){
   const res = { text, restored: 0, unknown: [], oneWay: [], spans: [], mappingEmpty: !S.rows.length };
   const oneWay = new Set(S.rows.filter(r => r.orig === null).map(r => r.token));
-  const labels = [...new Set(S.rows.map(r => r.token.slice(1, r.token.lastIndexOf('_'))))].sort((a, b) => b.length - a.length);
+  const labels = [...new Set(S.rows.map(r => r.label))].sort((a, b) => b.length - a.length);
   const seen = new Set();
   const note = (list, tok) => { if (!seen.has(tok)){ seen.add(tok); list.push(tok); } };
   // Resolved pieces are held in private-use placeholders until the end, so the second pass can't re-match
@@ -946,18 +1212,18 @@ function restoreText(text){
     const SFX = '(:\\\\?\\*\\\\?\\*\\\\?\\*\\\\?\\*\\d{4})?';                      // card suffix, maybe escaped
     const bracketed = new RegExp(
       // \[USER\_1\]: markdown-escaped on both sides (a lone "\" before "[" is a path, as in C:\Users\[USER_1])
-      `\\\\\\[\\s*${ZW}(${L})${SEP}(\\d+)${SFX}${ZW}\\s*\\\\\\]` +
+      `\\\\\\[\\s*${ZW}(${L})${SEP}(\\d+(?:\\.\\d+)?)${SFX}${ZW}\\s*\\\\\\]` +
       // [USER_1] [user 1] [User-1]
-      `|\\[\\s*${ZW}(${L})${SEP}(\\d+)${SFX}${ZW}\\s*\\]`, 'gi');
+      `|\\[\\s*${ZW}(${L})${SEP}(\\d+(?:\\.\\d+)?)${SFX}${ZW}\\s*\\]`, 'gi');
     // USER_1, USER\_1, [USER_1 or USER_1] with one bracket missing, plural USER_1s. Upper case only:
     // a bare lowercase user_1 is far more likely a code identifier than a reformatted token.
-    const bare = new RegExp(`(?<![A-Za-z0-9_])\\[?(${LB})\\\\?_(\\d+)(?![0-9])\\]?(?=(?:'?s)?(?![A-Za-z0-9_]))`, 'g');
+    const bare = new RegExp(`(?<![A-Za-z0-9_])\\[?(${LB})\\\\?_(\\d+(?:\\.\\d+)?)(?![0-9])\\]?(?=(?:'?s)?(?![A-Za-z0-9_]))`, 'g');
     t = t.replace(bracketed, (m, l1, n1, s1, l2, n2, s2) => resolve(l1 || l2, n1 || n2, (s1 || s2 || '').replace(/\\/g, ''), m))
          .replace(bare, (m, l, n) => resolve(l, n, '', m));
   }
   // Token-shaped text with a label this session never used: the AI invented it or it came from another session.
   // It stays as it is; holding it only marks where it is.
-  t = t.replace(/\[([A-Z][A-Z0-9_]*_\d+)(?::\*{4}\d{4})?\]/g, m => { note(res.unknown, m); return hold(m, 'unknown', m); });
+  t = t.replace(/\[([A-Z][A-Z0-9_]*_\d+(?:\.\d+)?)(?::\*{4}\d{4})?\]/g, m => { note(res.unknown, m); return hold(m, 'unknown', m); });
   let shift = 0;
   res.text = t.replace(/\uE002([\uE010-\uE019]+)\uE003/g, (m, s, off) => {
     const h = held[dec(s)];
@@ -981,9 +1247,10 @@ function restoreReport(r){
 
 function clearSession(){
   S.fwd.clear(); S.rev.clear(); S.cnt = {}; S.rows = []; S.byToken.clear(); S.learned.clear();
+  S.entNum.clear(); S.sub.clear(); S.entTokens.clear(); RUN.ent = {}; RUN.seen = new Map();
 }
 
-const rowInfo = r => ({ token: r.token, label: r.label, value: r.orig, oneWay: r.orig === null, seen: r.seen });
+const rowInfo = r => ({ token: r.token, label: r.label, value: r.orig, oneWay: r.orig === null, seen: r.seen, last: RUN.seen.get(r.token) || 0, entity: !!r.entity, part: r.part || '' });
 
 // Sample data is fictional: example domains, documentation IP ranges and test card numbers.
 const SAMPLE = `2026-11-10T09:14:22Z sign-in UPN=jane.doe@contoso.com IP=203.0.113.45 Device=DESKTOP-7FQ2K9L
@@ -993,10 +1260,11 @@ Host fs01.corp.contoso.com (10.20.30.40) contacted 198.51.100[.]7 from MAC 00-1A
 Command: net use \\\\fs01\\share /user:CONTOSO\\jdoe Summer2026! ; curl -u backup:Hunt3r2 https://198.51.100.20/upload
 Backup: https://contosobackup.blob.core.windows.net/data?sv=2022-11-02&sp=r&sig=Ab%2Bcd3fGh1JkLmN0pQrStUvWx%3D
 Phone +234 803 123 4567, account no: 0123456789, BVN 22212345678, card 4111 1111 1111 1111
+Note: Jane said the laptop never left her desk. Grace from the service desk will confirm.
 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U
 A Contoso config file contained password=Winter2026! in plain text.`;
 // Settings "Load sample" fills in when those boxes are empty, so the sample shows custom terms and domains at work.
-const SAMPLE_SETTINGS = { terms: ['Contoso | ORG'], domains: ['contoso.com'] };
+const SAMPLE_SETTINGS = { terms: ['Contoso | ORG', 'Jane Doe | PERSON'], domains: ['contoso.com'] };
 
 // The engine's whole interface. Values only leave it through mask(), restore(), rows() and lookup().
 const PM = Object.freeze({
@@ -1004,16 +1272,20 @@ const PM = Object.freeze({
   defaults: { terms: DEFAULT_TERMS.slice(), domains: DEFAULT_INTERNAL_DOMAINS.slice(), allow: DEFAULT_NEVER_MASK.slice() },
   sample: { text: SAMPLE, terms: SAMPLE_SETTINGS.terms.slice(), domains: SAMPLE_SETTINGS.domains.slice() },
   configure,
-  // -> { text, spans: [{ start, end, token }], counts: { LABEL: n } }
-  mask(text){ const r = maskText(String(text)); return { text: r.text, spans: r.spans, counts: Object.assign({}, RUN.counts) }; },
+  // -> { text, spans: [{ start, end, token }], counts: { LABEL: n }, entities: { entityKey: matches } }
+  mask(text){ const r = maskText(String(text)); return { text: r.text, spans: r.spans, counts: Object.assign({}, RUN.counts), entities: Object.assign({}, RUN.ent) }; },
   // -> { text, restored, unknown: [token], oneWay: [token], mappingEmpty, spans: [{ start, end, token, kind }] }
   restore: text => restoreText(String(text)),
   report: restoreReport,
   clear: clearSession,
-  // -> [{ token, label, value (null when one-way), oneWay, seen }] in creation order
+  // -> [{ token, label, value (null when one-way), oneWay, seen (this session), last (in the last Mask), entity, part ('', FIRST, LAST, USER) }]
+  //    in creation order
   rows: () => S.rows.map(rowInfo),
   lookup: token => { const r = S.byToken.get(token); return r ? rowInfo(r) : null; },
   size: () => S.rows.length,
+  // The entity list is the custom-terms list. parseTerms(text) -> [{ term, label, key }], the same parsing configure() uses.
+  parseTerms: text => parseTerms(text),
+  entityTypes: ['PERSON', 'ORG', 'HOST', 'PROJECT', 'OTHER'],
 });
 configure({ terms: DEFAULT_TERMS, domains: DEFAULT_INTERNAL_DOMAINS, allow: DEFAULT_NEVER_MASK });
 </script>
@@ -1032,7 +1304,13 @@ const CAT_ORDER = ['id', 'host', 'net', 'org', 'ref', 'ow'];
 const CAT_OF = { USER: 'id', PERSON: 'id', EMAIL: 'id', NETBIOS: 'id', HOST: 'host', TENANT: 'org', ORG_DOMAIN: 'org', TERM: 'org',
   PRIVATE_IP: 'net', PUBLIC_IP: 'net', MAC: 'net', GUID: 'ref', DOMAIN_SID: 'ref', ACCOUNT: 'ref', PHONE: 'ref' };
 // Anything else is a custom-term label (ORG, TEAM, ...), so it counts as organisation.
-const catOf = row => row.oneWay ? 'ow' : row.label.startsWith('AZ_') ? 'host' : (CAT_OF[row.label] || 'org');
+const catOf = row => row.oneWay ? 'ow' : row.label.startsWith('AZ_') ? 'host' : /^PERSON(?:_|$)/.test(row.label) ? 'id' : (CAT_OF[row.label] || 'org');
+// "Identity · first name": the category, plus which entity form a token stands for.
+const PART_NAME = { FIRST: 'first name', LAST: 'last name', USER: 'username' };
+const typeText = row => CAT_NAME[catOf(row)] + (row.part ? ' \u00b7 ' + PART_NAME[row.part]
+  : row.entity ? ' \u00b7 ' + (row.label === 'PERSON' ? 'full name' : row.label === 'ORG' || row.label === 'HOST' ? 'entity' : row.label.toLowerCase().replace(/_/g, ' ')) : '');
+const TYPE_NAME = { PERSON: 'person', ORG: 'organisation', HOST: 'host', PROJECT: 'project', OTHER: 'other' };
+const entCat = label => label === 'PERSON' ? 'id' : label === 'HOST' ? 'host' : 'org';
 
 // Highlighting every token of a huge paste would make the page sluggish; past this many the rest is plain text.
 const RENDER_MAX = 20000;
@@ -1044,6 +1322,7 @@ const isTyping = t => t && (t.tagName === 'TEXTAREA' || t.isContentEditable ||
 // What each output shows: the engine's string, its spans, and the rendered token elements.
 const view = { masked: null, restored: null };
 let hideValues = false;
+let lastEntityCounts = null;   // entity key -> matches in the last Mask
 let lastPointer = 'mouse';
 
 // ---------- toast and copy ----------
@@ -1100,6 +1379,7 @@ function paintSummary(){
   $('settingsSummary').textContent = `${on} detectors on, ${plural(terms, 'custom term')}, ${plural(domains, 'domain')}`;
 }
 ['terms', 'domains', 'allow'].forEach(id => $(id).addEventListener('input', paintSummary));
+$('terms').addEventListener('input', () => renderChips());
 document.querySelectorAll('[data-g]').forEach(cb => cb.addEventListener('change', paintSummary));
 
 // ---------- rendering outputs ----------
@@ -1134,7 +1414,8 @@ function renderOut(id, text, spans, classFor){
 function rowCat(token){ const r = PM.lookup(token); return r ? catOf(r) : 'ow'; }
 
 function clearMasked(){
-  view.masked = null; hidePv();
+  view.masked = null; hidePv(); hideSelAdd();
+  if (lastEntityCounts){ lastEntityCounts = null; renderChips(); }
   emptyState($('masked'), 'Masked text appears here.', 'Tokens are highlighted by type. Hover one to see its real value; click to copy it.');
   $('legend').hidden = true; $('legend').replaceChildren();
   $('maskStatus').textContent = ''; $('maskStatus').className = 'status-line';
@@ -1182,7 +1463,8 @@ function doMask(){
   const distinct = new Set(r.spans.map(s => s.token)).size;
   $('maskMeta').textContent = distinct ? plural(distinct, 'token') : 'nothing found';
   setPrimary('mask', true);
-  renderMap();
+  lastEntityCounts = r.entities;
+  renderMap(); renderChips();
 }
 
 function doRestore(){
@@ -1234,7 +1516,7 @@ function showPv(node, pinned){
   } else {
     const r = d.row;
     head.append(el('span', 'mono', (d.sp.kind === 'restored' ? 'from ' : '') + r.token),
-      el('span', '', CAT_NAME[catOf(r)] + (r.seen > 1 ? ', seen ' + r.seen + '×' : '')));
+      el('span', '', typeText(r) + (r.last > 1 ? ', ' + r.last + '\u00d7 here' : '')));
     pv.append(head, valueEl(r));
     if (pinned){
       const row = el('div', 'row');
@@ -1311,7 +1593,8 @@ for (const id of ['masked', 'restored']){
   box.addEventListener('focusout', e => { if (pvNode && !pv.classList.contains('pinned') && !box.contains(e.relatedTarget)) hidePv(); });
 }
 document.addEventListener('click', e => { if (pv.classList.contains('pinned') && !pv.contains(e.target) && !tokenAt(e.target)) hidePv(); });
-addEventListener('scroll', placePv, true);
+// The select-to-add control sits where the selection was, so it closes when the page scrolls (not the text box).
+addEventListener('scroll', e => { placePv(); if (!$('selAdd').hidden && (e.target === document || e.target === document.documentElement)) hideSelAdd(); }, true);
 addEventListener('resize', placePv);
 
 // Legend: hover or focus an entry to outline every token of that type.
@@ -1334,7 +1617,7 @@ function renderMap(){
   }
   const q = $('filter').value.trim().toLowerCase();
   // While values are hidden the filter matches tokens and types only, so it can't be used to probe for a value.
-  const match = q ? rows.filter(r => (r.token + ' ' + CAT_NAME[catOf(r)] + ' ' + (r.oneWay ? 'one-way' : hideValues ? '' : r.value)).toLowerCase().includes(q)) : rows;
+  const match = q ? rows.filter(r => (r.token + ' ' + typeText(r) + ' ' + (r.oneWay ? 'one-way' : hideValues ? '' : r.value)).toLowerCase().includes(q)) : rows;
   const frag = document.createDocumentFragment();
   const tpl = $('tplCopy').content;
   for (const r of match.slice(0, MAP_MAX)){
@@ -1343,12 +1626,13 @@ function renderMap(){
     tb.type = 'button'; tb.title = 'Copy token'; tb.setAttribute('aria-label', 'Copy token ' + r.token);
     tb.addEventListener('click', () => copy(r.token, 'Copied token ' + r.token));
     tok.append(tb);
-    const typ = td('typ'); typ.append(el('span', 'sw c-' + cat), CAT_NAME[cat]);
+    const typ = td('typ'); typ.append(el('span', 'sw c-' + cat), typeText(r));
     const val = td(r.oneWay ? 'val none' : 'val');
     if (r.oneWay) val.textContent = 'Not kept (one-way)';
     else if (hideValues){ const bar = el('span', 'redact'); bar.setAttribute('aria-label', 'Value hidden'); val.append(bar); }
     else val.append(el('span', '', r.value));
-    const num = td('num'); num.textContent = r.seen + '×';
+    // Times in the last Mask: re-masking the same text doesn't inflate it.
+    const num = td('num'); num.textContent = r.last ? r.last + '\u00d7' : '\u2013';
     const act = td('act'), cb = el('button', 'icon-btn');
     cb.type = 'button'; cb.append(tpl.cloneNode(true));
     cb.disabled = r.oneWay;
@@ -1367,9 +1651,113 @@ $('filter').addEventListener('input', renderMap);
 $('hideBtn').addEventListener('click', () => {
   hideValues = !hideValues;
   $('hideBtn').setAttribute('aria-pressed', String(hideValues));
-  hidePv(); renderMap();
+  hidePv(); renderMap(); renderChips();
   toast(hideValues ? 'Real values hidden on screen. Copy still works.' : 'Real values shown');
 });
+
+// ---------- entities: the custom-terms list, edited here or in Settings ----------
+// The Settings "Custom terms" box is the list itself; the chips are drawn from it, so the two always agree.
+function renderChips(){
+  const seen = new Set(), ul = $('entChips');
+  const items = PM.parseTerms($('terms').value).filter(x => !seen.has(x.key) && seen.add(x.key));
+  $('entsCount').textContent = items.length ? String(items.length) : '';
+  ul.replaceChildren(...items.map(x => {
+    const li = el('li', 'chip');
+    li.append(el('span', 'sw c-' + entCat(x.label)));
+    if (hideValues){ const bar = el('span', 'redact sm'); bar.setAttribute('aria-label', 'Value hidden'); li.append(bar); }
+    else li.append(el('span', 'chip-val', x.term));
+    li.append(el('span', 'chip-type', TYPE_NAME[x.label] || x.label.toLowerCase()));
+    if (lastEntityCounts){
+      const n = lastEntityCounts[x.key] || 0;
+      const ct = el('span', 'chip-ct' + (n ? '' : ' zero'), n + '×');
+      ct.title = n ? 'Matches in the last Mask' : 'Not found in the last Mask';
+      li.append(ct);
+    }
+    const rm = el('button', 'chip-x');
+    rm.type = 'button'; rm.title = 'Remove'; rm.setAttribute('aria-label', 'Remove this entity');
+    const xs = el('span', '', '×'); xs.setAttribute('aria-hidden', 'true'); rm.append(xs);
+    rm.addEventListener('click', () => removeEntity(x.key));
+    li.append(rm);
+    return li;
+  }));
+  ul.hidden = !items.length;
+  $('entsEmpty').hidden = !!items.length;
+}
+function afterEntitiesChanged(msg){
+  paintSummary(); renderChips(); toast(msg);
+  if ($('input').value.trim()) doMask();
+}
+// Adds "term | TYPE" to the list. Returns true when it was added.
+function addEntity(text, type){
+  const term = String(text).replace(/\s+/g, ' ').trim().replace(/\|/g, '/');
+  if (term.length < 2){ toast('An entity needs at least 2 characters.'); return false; }
+  const [x] = PM.parseTerms(term + ' | ' + type);
+  if (PM.parseTerms($('terms').value).some(y => y.key === x.key)){ toast('That entity is already in the list.'); return false; }
+  const ta = $('terms');
+  ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n' : '') + x.term + ' | ' + x.label;
+  afterEntitiesChanged('Entity added');
+  return true;
+}
+function removeEntity(key){
+  const ta = $('terms');
+  ta.value = ta.value.split(/\r?\n/).filter(l => { const [x] = PM.parseTerms(l); return !x || x.key !== key; }).join('\n');
+  afterEntitiesChanged('Removed 1 entity');
+}
+$('entAdd').addEventListener('click', () => {
+  if (!$('entInput').value.trim()) return toast('Type a name or term first.');
+  if (addEntity($('entInput').value, $('entType').value)) $('entInput').value = '';
+});
+$('entInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey){ e.preventDefault(); $('entAdd').click(); } });
+$('entsToggle').addEventListener('click', () => {
+  const open = $('entsToggle').getAttribute('aria-expanded') !== 'true';
+  $('entsToggle').setAttribute('aria-expanded', String(open));
+  $('entsBody').hidden = !open;
+});
+
+// Select-to-add: select a name in the raw text, or in the unmasked part of the output, and add it as an entity.
+// The selected text is held only until it is added or the control closes; it is never shown in the control.
+let selPending = null;
+function hideSelAdd(){ selPending = null; $('selAdd').hidden = true; }
+function showSelAdd(text, x, y){
+  const t = text.trim();
+  if (!t || t.length > 100 || /[\r\n]/.test(text)) return hideSelAdd();
+  selPending = t;
+  const bar = $('selAdd');
+  bar.hidden = false;
+  const w = bar.offsetWidth, h = bar.offsetHeight;
+  bar.style.left = Math.min(Math.max(12, x), innerWidth - w - 12) + 'px';
+  bar.style.top = (y + h + 20 > innerHeight ? Math.max(12, y - h - 32) : y + 8) + 'px';
+}
+function rawSelection(e){
+  const ta = $('input');
+  setTimeout(() => {
+    if (document.activeElement !== ta || ta.selectionStart === ta.selectionEnd) return hideSelAdd();
+    const r = ta.getBoundingClientRect();
+    const mouse = e.type === 'mouseup';
+    showSelAdd(ta.value.slice(ta.selectionStart, ta.selectionEnd), mouse ? e.clientX : r.left + 16, mouse ? e.clientY : r.bottom - 8);
+  }, 0);
+}
+function outputSelection(){
+  setTimeout(() => {
+    const box = $('masked'), v = view.masked, sel = document.getSelection();
+    if (!v || !sel || !sel.rangeCount || sel.isCollapsed) return hideSelAdd();
+    const range = sel.getRangeAt(0);
+    if (!box.contains(range.startContainer) || !box.contains(range.endContainer)) return hideSelAdd();
+    const a = charOffset(box, range.startContainer, range.startOffset), b = charOffset(box, range.endContainer, range.endOffset);
+    // Only text that is still unmasked: the selection must not touch a token.
+    if (b <= a || v.spans.some(sp => sp.start < b && sp.end > a)) return hideSelAdd();
+    const r = range.getBoundingClientRect();
+    showSelAdd(v.text.slice(a, b), r.left, r.bottom);
+  }, 0);
+}
+$('input').addEventListener('mouseup', rawSelection);
+$('input').addEventListener('keyup', e => { if (e.shiftKey || e.key === 'Shift') rawSelection(e); });
+$('input').addEventListener('input', hideSelAdd);
+$('masked').addEventListener('mouseup', outputSelection);
+$('masked').addEventListener('keyup', e => { if (e.shiftKey || e.key === 'Shift') outputSelection(); });
+document.addEventListener('mousedown', e => { if (!$('selAdd').hidden && !$('selAdd').contains(e.target)) hideSelAdd(); });
+$('selAddBtn').addEventListener('click', () => { const t = selPending; hideSelAdd(); if (t) addEntity(t, $('selType').value); });
+$('selClose').addEventListener('click', hideSelAdd);
 
 // ---------- tabs ----------
 let current = 'mask';
@@ -1381,7 +1769,7 @@ function setTab(which, focus){
     $('tab-' + t).tabIndex = on ? 0 : -1;
     $('panel-' + t).hidden = !on;
   }
-  hidePv();
+  hidePv(); hideSelAdd();
   if (focus) $('tab-' + which).focus();
 }
 $('tab-mask').addEventListener('click', () => setTab('mask'));
@@ -1456,6 +1844,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Escape'){
+    if (!$('selAdd').hidden){ hideSelAdd(); return; }
     if (pvNode){ hidePv(); return; }
     if ($('keys').open){ closeKeys(); $('keysBtn').focus(); }
     return;
@@ -1502,7 +1891,7 @@ if (darkMq.addEventListener) darkMq.addEventListener('change', paintThemeBtn);
 // text and both rendered outputs are cleared whenever the page is hidden for navigation or closing.
 // The mapping stays in memory only.
 addEventListener('pagehide', () => {
-  $('input').value = ''; $('reply').value = '';
+  $('input').value = ''; $('reply').value = ''; $('entInput').value = '';
   clearMasked(); clearRestored();
 });
 
@@ -1511,7 +1900,7 @@ if (isMac) document.querySelectorAll('.k-mod').forEach(k => { k.textContent = '�
 $('terms').value = PM.defaults.terms.join('\n');
 $('domains').value = PM.defaults.domains.join('\n');
 $('allow').value = PM.defaults.allow.join('\n');
-paintSummary(); paintThemeBtn(); clearMasked(); clearRestored(); renderMap();
+paintSummary(); paintThemeBtn(); clearMasked(); clearRestored(); renderMap(); renderChips();
 })();
 </script>
 </body>
