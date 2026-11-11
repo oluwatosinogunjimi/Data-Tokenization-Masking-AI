@@ -55,6 +55,10 @@ jdoe, jane.doe, CORP\jdoe     ->  [PERSON_USER_1], [PERSON_USER_1.2], [NETBIOS_1
 
 Each different spelling gets its own sub-index (`.2`, `.3`), so Restore puts back exactly what was there. Other types match the whole term only. "grace period" or "will" stay as they are; a capitalised "Will" at the start of a sentence is masked if a listed person is called Will. The list is the same as **Custom terms** in Settings (`Jane Doe | PERSON`, one per line). It is kept for the tab, also after **End session**; to preload entities, edit `DEFAULT_TERMS` in your copy of the file.
 
+## Grouping
+
+When two tokens are the same thing (a host's short and full name, a user's account and email), drag one row onto the other in the **Mapping** table, or use its **Group with…** button. The value gets a token under the other one's number, such as `[HOST_1.2]` or `[PERSON_EMAIL_1]`, in this and every later paste. Its old token still restores, and **Ungroup** undoes it. Nothing is ever grouped unless you do it; one-way values can't be grouped.
+
 ## Settings and shortcuts
 
 Open **Settings** (or press S) for a drawer with these options. Changes apply the next time you press Mask.

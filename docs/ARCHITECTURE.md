@@ -31,10 +31,15 @@ PM.restore(text)   -> { text, restored, unknown: [token], oneWay: [token], mappi
 PM.report(result)  -> [{ kind, text }]   the restore report lines, built from the token lists only
 PM.rows()          -> [{ token, label, value (null if one-way), oneWay, seen, last, entity, part }] in creation order
                       seen: uses this session; last: uses in the last Mask; part: '', FIRST, LAST or USER
+                      also type (first label), root ([HOST_1]), grouped, alias, aliasOf, was ([old tokens]), original
 PM.lookup(token)   -> one such row, or null
 PM.size()          -> number of tokens in the session
 PM.clear()         -> forget every token and learned domain
 PM.parseTerms(text) -> [{ term, label, key }]   the entity list as configure() reads it
+PM.group(source, target) -> { ok, token, root, moved: [{ from, to }], reason }   manual grouping
+PM.ungroup(token)  -> { ok, token, reason }   the value goes back to its first token
+PM.canGroup(source, target) -> '' or the reason it isn't allowed
+PM.rewrite(maskedText) -> { text, spans }   already-masked text with the current tokens
 PM.groups, PM.defaults, PM.sample, PM.entityTypes   detector groups, editable defaults, built-in sample, offered entity types
 ```
 
@@ -78,6 +83,7 @@ flowchart LR
 - **Theme.** Day (paper) and Night (graphite) palettes. The page follows `prefers-color-scheme` until the user picks one with the sun/moon button.
 - **Entities strip.** Above the two panes on the Mask tab (collapsible): a text box, a type (Person, Organisation, Host, Project, Other) and Add, then one chip per entity with its type swatch, how many times it matched in the last Mask, and a remove button. Adding or removing re-masks when there is raw text. The chips are drawn from the Settings "Custom terms" box, which is the list itself, so editing either keeps both in step. Hide values replaces chip text with a bar. The list is a setting: End session keeps it, closing the tab loses it (preload entities with `DEFAULT_TERMS`).
 - **Select-to-add.** Selecting 1–100 characters on one line in the raw text, or in the unmasked part of the masked output, shows a small "Add as entity" control (type plus Add) next to the selection. The selected text is held only until it is added or the control closes, and is never shown in the control. A selection that touches a token offers nothing.
+- **Grouping.** In the mapping table, drag a row by its handle onto another row, or use the row's Group with… button (a dialog with a filter; arrows and Enter, or a click; Esc cancels). Valid drop targets are highlighted, invalid ones show not-allowed, and one-way rows have the controls disabled with the reason. Grouped rows are listed under their group's head (the root token's row, or the first listed form of an entity) with a bracket, the head shows a member count, and each grouped row shows "was [HOST_2]" and an Ungroup button. Grouping re-masks when there is raw text, otherwise it rewrites the shown output with `PM.rewrite()`. Drag handles are hidden on touch screens, where Group with… does the job. Toasts (an `aria-live` region) name tokens only: "Grouped [HOST_2] into [HOST_1] as [HOST_1.2]". Hide values also hides values in the dialog.
 - **Large pastes.** The first 20,000 tokens are highlighted and the rest of the output is plain text, with a note; Copy masked still copies everything.
 
 ## Tokens
@@ -145,6 +151,18 @@ Other entity types match the whole term only, in any case and spacing; they get 
 
 **Where the entity passes run.** Listed people's full-name forms run just before the username detectors (so `Dr Jane A. Doe` stays one name). The rest run where custom terms always did: other entity types, then URLs, then username forms, then a first or last name alone. In a URL, a host label, path segment, query key or value, fragment or user name that is wholly an entity form is masked, percent- or plus-encoded too (`https://jdoe.example.com/u/jdoe?owner=Jane%20Doe#jdoe` → `https://[PERSON_USER_1].example.com/u/[PERSON_USER_1]?owner=[PERSON_1]#[PERSON_USER_1]`); the token stands for the text exactly as written in the URL. Outside URLs, a username form is masked as the first label of a hostname (`jdoe.corp.example.com`, `jdoe.corp`), as a whole path segment (`\\fs01\jdoe\x`, `"/srv/jdoe/data"`) and as a UNC host (`\\jdoe\share`); a capitalised first or last name also counts as a whole path segment. Boundaries keep matches out of longer words and identifiers (`Doesn't`, `Doe123`, `Mary-Jane`, `x_jdoe`, `jdoe2`, `/xjdoe/`), file names (`jdoe.txt`, `jdoe.png`, `jdoe.tar.gz`), emails (whole emails stay `[EMAIL_n]`), hashes and existing tokens. The re-masking step skips entity tokens, since the entity passes already find every form.
 
+## Grouping
+
+Nothing is ever grouped automatically, and the page makes no suggestions. The user groups a **source** token into a **target** token when both stand for the same thing; types may differ.
+
+- **Root.** The group's root is the target's root: its group's root if it is already grouped, its entity if it is an entity form (`[PERSON_FIRST_1]` → `PERSON_1`), otherwise the target itself.
+- **New token.** The source value gets a token under the root's number, reusing the entity scheme (same number = same thing). Same type as the root: the next free sub-index (`HOST` into `[HOST_1]` → `[HOST_1.2]`). Another type: a composite label, `ROOT_TYPE` with the root's number (`USER` into `[PERSON_1]` → `[PERSON_USER_1]`, `EMAIL` → `[PERSON_EMAIL_1]`, `PRIVATE_IP` into `[HOST_1]` → `[HOST_PRIVATE_IP_1]`); when that label and number are taken, the next sub-index (`[PERSON_USER_1.2]`). The colour still follows what the value is (its first type).
+- **Merge.** Grouping a root token moves its whole group (including an entity's forms) into the target's group. An entity moved under a root of its own type keeps growing there: new spellings get the root's number.
+- **One-way tokens** have no stored value, so they can be neither source nor target.
+- **Forward map.** Every forward-map entry that pointed at the source now points at the new token, so the current output (re-masked, or rewritten when the raw text is gone) and every later paste use it, including re-masking and entity routing.
+- **Aliases.** The old token stays in the reverse map as an alias (`aliasOf` the new token), because text with it may already be in an AI chat; it is hidden from the table but listed on the new row as "was [HOST_2]". Restore accepts old and new tokens, in every tolerant form (`[host 1.2]`, `HOST_PRIVATE_IP_1`, `[person_user_1.2]`).
+- **Ungroup** sends the value back to its first token (`original`); the grouped token stays a restorable alias. **End session** clears every group with the rest of the mapping.
+
 ## Session store
 
 ```text
@@ -158,6 +176,7 @@ S = {
   entNum: Map<entity key, n>                                          // each entity's number
   sub: Map<"LABEL_n", k>                                              // surface forms numbered so far
   entTokens: Set<token>                                               // tokens owned by entities
+  groupTokens: Set<token>                                             // tokens made by grouping
 }
 // Entity surface forms are keyed "=LABEL_n|exact surface" in fwd.
 ```
@@ -271,10 +290,11 @@ As a backstop, the raw text and reply boxes and both rendered outputs are cleare
 - **Entity tokens reveal more structure.** Linked tokens show that `[PERSON_FIRST_1]` and `[PERSON_USER_1]` are the same person, and sub-indexes show how many spellings were seen.
 - **Cues can be wrong.** Field and keyword cues assume the value after `user=` is a user and the value after `Display Name:` is a person. An app name in a `DisplayName` field becomes a `PERSON` token, and an ordinary word that happens to equal a known username elsewhere is re-masked.
 - **Learned domains hide destinations.** If the text contains an address at a domain, every URL and host under that domain is masked too. Turn on *Keep email domain* when those destinations matter.
+- **Grouping is your call.** A wrong group makes the AI treat two different things as one. Ungroup undoes it for later pastes; text already pasted keeps whatever tokens it had.
 - **Restore trusts token shapes.** Any token form in the reply that matches a stored token is replaced, even if the AI used it to mean something else.
 
 ## Tests
 
-- `node tests/run.js` loads only the engine block into a Node VM with no DOM (`tests/page.js`) and drives `PM` directly, with a fresh engine per case. It runs the masking cases in `tests/cases.js` (leak and keep checks, including every entity form, routing and false-positive bait), restore checks, entity checks (an exact round trip, sub-indexed and reformatted tokens, unknown sub-indexes, numbering, match counts) (including the `unknown` and `oneWay` lists and the report built from them), span positions, mapping rows, session reuse, the built-in sample round trip and timing on worst-case inputs. It also checks the whole file statically: hardened text fields, the CSP, the theme-only storage rule, no other storage, network, HTML injection, links or forms, no page access from the engine, and the `pagehide` handler. Cases marked `todo` are known gaps. They are listed with `--gaps`, and the run fails if one starts passing so its `todo` gets removed.
-- `node tests/ui.js` opens the page in headless Chromium with Playwright and goes through it end to end: the sample, highlighted tokens, plain-text copies equal to the engine's output (including a hand-made selection), hover, click, Shift-click and keyboard on tokens, Hide values, the mapping filter, the settings drawer and a toggle, shortcuts, restore of a reformatted reply and its report, `pagehide`, End session, the theme persisting with only the allowed key, the Entities strip (add, duplicate, remove, chips and counts, Settings sync, Hide values on chips), select-to-add in the raw text and in the output, a 390 px phone layout without horizontal scrolling, timing for 1.5 MB inputs, and no console errors or network requests. Without the `playwright` package it prints "skipped" and exits 0. CI installs it after the dependency-free steps.
+- `node tests/run.js` loads only the engine block into a Node VM with no DOM (`tests/page.js`) and drives `PM` directly, with a fresh engine per case. It runs the masking cases in `tests/cases.js` (leak and keep checks, including every entity form, routing and false-positive bait), restore checks, grouping checks (sub-index, composite labels, root resolution, merge, one-way refusals, later pastes, aliases, ungroup, a reformatted mixed reply restoring exactly, End session), entity checks (an exact round trip, sub-indexed and reformatted tokens, unknown sub-indexes, numbering, match counts) (including the `unknown` and `oneWay` lists and the report built from them), span positions, mapping rows, session reuse, the built-in sample round trip and timing on worst-case inputs. It also checks the whole file statically: hardened text fields, the CSP, the theme-only storage rule, no other storage, network, HTML injection, links or forms, no page access from the engine, and the `pagehide` handler. Cases marked `todo` are known gaps. They are listed with `--gaps`, and the run fails if one starts passing so its `todo` gets removed.
+- `node tests/ui.js` opens the page in headless Chromium with Playwright and goes through it end to end: the sample, highlighted tokens, plain-text copies equal to the engine's output (including a hand-made selection), hover, click, Shift-click and keyboard on tokens, Hide values, the mapping filter, the settings drawer and a toggle, shortcuts, restore of a reformatted reply and its report, `pagehide`, End session, the theme persisting with only the allowed key, the Entities strip (add, duplicate, remove, chips and counts, Settings sync, Hide values on chips), select-to-add in the raw text and in the output, grouping by drag and drop and by Group with… with the keyboard (nesting, was-labels, Ungroup, Hide values in the dialog, touch at 390 px), a 390 px phone layout without horizontal scrolling, timing for 1.5 MB inputs, and no console errors or network requests. Without the `playwright` package it prints "skipped" and exits 0. CI installs it after the dependency-free steps.
 - `node tests/public-safety.js` keeps real-looking data out of the repo: unknown GUIDs, non-example email domains, public IPs outside documentation ranges, and terms from a private, git-ignored `.public-safety-denylist`.

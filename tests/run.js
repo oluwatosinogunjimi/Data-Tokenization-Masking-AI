@@ -147,6 +147,67 @@ for (const c of cases){
     ? ok('entities: parseTerms reads the list as configure does') : fail('entities: parseTerms reads the list as configure does', JSON.stringify(parsed));
 }
 
+// ---- 4c. Manual grouping ----
+{
+  const check = (name, cond, detail) => cond ? ok('grouping: ' + name, detail) : fail('grouping: ' + name, detail || 'failed');
+  const p = loadPage({ domains: ['example.local'], terms: ['Jane Doe | PERSON'] });
+  const raw = 'host fs01.example.local and nas2.example.local from 10.0.0.5; user=bob2 mail bob@example.com; Jane and jdoe; password=Hunter2!x';
+  const first = p.mask(raw);
+  const P = p.PM, tk = v => P.rows().find(r => r.value === v && !r.alias).token;
+  const [H1, H2, IP, U, E] = ['fs01.example.local', 'nas2.example.local', '10.0.0.5', 'bob2', 'bob@example.com'].map(tk);
+  const SEC = P.rows().find(r => r.oneWay).token;
+
+  let g = P.group(H2, H1);
+  check('same type takes the next sub-index', g.ok && g.token === '[HOST_1.2]' && g.root === '[HOST_1]', JSON.stringify(g));
+  g = P.group(IP, H2);   // the target is a member: its root is [HOST_1]
+  check('cross-type gets a composite label under the target\u2019s root', g.ok && g.token === '[HOST_PRIVATE_IP_1]', JSON.stringify(g));
+  g = P.group(U, '[PERSON_FIRST_1]');   // an entity part: its root is the entity, [PERSON_1]; the entity already has [PERSON_USER_1]
+  check('an entity part resolves to its entity, and a taken label+number gets a sub-index', g.ok && g.token === '[PERSON_USER_1.2]', JSON.stringify(g));
+  g = P.group(E, U);
+  check('a token already grouped is a valid target', g.ok && g.token === '[PERSON_EMAIL_1]', JSON.stringify(g));
+  const one = [P.group(SEC, H1), P.group(H1, SEC)];
+  check('one-way tokens are rejected as source and as target', one.every(x => !x.ok && /One-way/.test(x.reason)), JSON.stringify(one));
+  check('grouping into the same group is rejected', !P.group(H2, H1).ok && !P.group('[HOST_1.2]', H1).ok);
+
+  const second = p.mask(raw);
+  check('the next Mask uses the new tokens', ['[HOST_1.2]', '[HOST_PRIVATE_IP_1]', '[PERSON_USER_1.2]', '[PERSON_EMAIL_1]'].every(t => second.includes(t)) && ![H2, IP, U, E].some(t => second.includes(t)), second);
+  const later = p.mask('later: nas2.example.local talked to 10.0.0.5, bob2 again');
+  check('later pastes and re-masking of known values use them', later === 'later: [HOST_1.2] talked to [HOST_PRIVATE_IP_1], [PERSON_USER_1.2] again', later);
+  check('rewrite moves already-masked text to the current tokens', P.rewrite(first).text === second, P.rewrite(first).text);
+  const aliases = P.rows().filter(r => r.alias);
+  check('old tokens are kept as aliases of the new ones', aliases.map(r => r.token).sort().join() === [H2, U, IP, E].sort().join() && aliases.every(r => P.lookup(r.aliasOf) && P.lookup(r.aliasOf).value === r.value));
+  const reply = `Old ${H2} and ${IP}; new [host 1.2], HOST_PRIVATE_IP_1, [person_user_1.2], [Person Email 1] and \\[HOST\\_1.2\\].`;
+  const back = p.restore(reply);
+  check('a reply mixing old and new tokens, reformatted, restores exactly', back === 'Old nas2.example.local and 10.0.0.5; new nas2.example.local, 10.0.0.5, bob2, bob@example.com and nas2.example.local.', back);
+  check('a full masked text with new tokens restores to the raw text', p.restore(second) === raw.replace('Hunter2!x', '[SECRET_1]'), p.restore(second));
+
+  // Merge: a root with members moves its whole group.
+  const q = loadPage({ domains: ['example.local'] });
+  q.mask('a.example.local b.example.local c.example.local 10.0.0.9');
+  const Q = q.PM;
+  Q.group('[HOST_2]', '[HOST_1]'); Q.group('[PRIVATE_IP_1]', '[HOST_1]');
+  const m = Q.group('[HOST_1]', '[HOST_3]');
+  check('grouping a root moves its whole group', m.ok && m.moved.map(x => x.to).join() === '[HOST_3.2],[HOST_3.3],[HOST_PRIVATE_IP_3]', JSON.stringify(m));
+  check('after a merge every value restores through every token it had', q.restore('[HOST_1] [HOST_1.2] [HOST_3.3] [HOST_PRIVATE_IP_1] [HOST_PRIVATE_IP_3]') === 'a.example.local b.example.local b.example.local 10.0.0.9 10.0.0.9');
+
+  // Ungroup returns the value to its first token; the grouped token stays an alias.
+  const u = Q.ungroup('[HOST_3.3]');
+  const after = q.mask('b.example.local');
+  check('ungroup returns the value to its first token', u.ok && u.token === '[HOST_2]' && after === '[HOST_2]' && q.restore('[HOST_3.3] [HOST_1.2]') === 'b.example.local b.example.local', JSON.stringify(u) + ' ' + after);
+  check('ungroup of a token not in a group is refused', !Q.ungroup('[HOST_3]').ok);
+  // Entity forms follow the group: a listed username grouped into a host.
+  const e = loadPage({ domains: ['example.local'], terms: ['Jane Doe | PERSON'] });
+  e.mask('ws01.example.local CORP\\jdoe');
+  const eg = e.PM.group('[PERSON_USER_1]', '[HOST_1]');
+  const em = e.mask('again CORP\\jdoe and C:\\Users\\jdoe');
+  check('entity routing and the entity passes use the group token', eg.token === '[HOST_PERSON_USER_1]' && em === 'again [NETBIOS_1]\\[HOST_PERSON_USER_1] and C:\\Users\\[HOST_PERSON_USER_1]', em);
+  const rows = e.PM.rows().find(r => r.token === '[HOST_PERSON_USER_1]');
+  check('rows carry group, root and alias information', rows.grouped && rows.root === '[HOST_1]' && rows.was.join() === '[PERSON_USER_1]' && rows.original === '[PERSON_USER_1]' && e.PM.rows().find(r => r.token === '[PERSON_USER_1]').aliasOf === '[HOST_PERSON_USER_1]');
+  e.clear();
+  const ec = e.mask('ws01.example.local CORP\\jdoe');
+  check('End session clears groups', ec === '[HOST_1] [NETBIOS_1]\\[PERSON_USER_1]' && !e.PM.rows().some(r => r.grouped || r.alias), ec);
+}
+
 // ---- 5. Spans: where mask() and restore() say each token is, for highlighting ----
 {
   const p = loadPage();

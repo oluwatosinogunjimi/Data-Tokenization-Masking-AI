@@ -246,6 +246,38 @@ select { min-height: 32px; padding: 4px 8px; font-size: 14px; border: 1px solid 
 .icon-btn.sm { width: 28px; height: 28px; }
 @media (max-width: 600px) { .ents-hint { display: none; } .ents-add { flex: 1 1 100%; } .ents-add input { flex: 1; width: auto; min-width: 0; } }
 
+/* ---------- grouping ---------- */
+table.mt .grip { display: inline-grid; place-items: center; width: 18px; height: 26px; margin-right: 4px; vertical-align: middle; color: var(--muted); cursor: grab; border-radius: var(--r); }
+table.mt .grip:hover { color: var(--ink); background: var(--surface-2); }
+table.mt .grip.off { visibility: hidden; }
+table.mt .grip svg { width: 14px; height: 14px; }
+table.mt tr.dragging { opacity: .45; }
+table.mt tr.drop-ok td { background: var(--pen-soft); }
+table.mt tr.drop-ok { outline: 2px dashed var(--pen); outline-offset: -2px; }
+table.mt tr.drop-no { cursor: not-allowed; }
+table.mt tr.member td.tok { position: relative; padding-left: 44px; }
+table.mt tr.member td.tok::before { content: ""; position: absolute; left: 24px; top: 0; height: 22px; width: 10px; border-left: 1.5px solid var(--line-strong); border-bottom: 1.5px solid var(--line-strong); }
+table.mt tr.member:not(.last) td.tok::after { content: ""; position: absolute; left: 24px; top: 22px; bottom: 0; border-left: 1.5px solid var(--line-strong); }
+table.mt .grp-count { margin-left: 8px; font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+table.mt .was { display: block; margin-left: 22px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: normal; }
+table.mt tr.member .was { margin-left: 0; }
+table.mt .act .ungroup { margin-right: 4px; vertical-align: middle; }
+svg.i.inline { width: 14px; height: 14px; vertical-align: -2px; }
+dialog.grp { width: min(520px, calc(100vw - 32px)); }
+dialog.grp input { min-height: 36px; padding: 4px 10px; font-size: 14px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--surface-2); width: 100%; }
+dialog.grp input:focus { outline: none; border-color: var(--pen); box-shadow: 0 0 0 3px var(--pen-soft); background: var(--surface); }
+.grp-list { list-style: none; margin: 0; padding: 0; max-height: min(320px, 50vh); overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
+.grp-list:empty { display: none; }
+.grp-opt { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; align-items: center; padding: 7px 10px; cursor: pointer; border-bottom: 1px solid var(--line); font-size: 14px; }
+.grp-opt:last-child { border-bottom: 0; }
+.grp-opt:hover { background: var(--surface-2); }
+.grp-opt[aria-selected="true"] { background: var(--pen-soft); outline: 2px solid var(--pen); outline-offset: -2px; }
+.grp-opt .tk { font-family: var(--font-mono); font-size: 13px; padding: 0 1px; }
+.grp-type { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); font-size: 13px; white-space: nowrap; }
+.grp-val { grid-column: 1 / -1; font-family: var(--font-mono); font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.grp-opt .redact { grid-column: 1 / -1; }
+@media (max-width: 640px), (hover: none) { table.mt .grip { display: none; } table.mt tr.member td.tok { padding-left: 34px; } table.mt tr.member td.tok::before, table.mt tr.member:not(.last) td.tok::after { left: 14px; } table.mt .was { margin-left: 0; } }
+
 /* ---------- token popover ---------- */
 .pv { position: fixed; z-index: 75; width: max-content; max-width: min(380px, calc(100vw - 24px)); background: var(--surface); color: var(--ink);
   border: 1px solid var(--line-strong); border-radius: var(--r); box-shadow: 3px 3px 0 var(--line); padding: 10px 12px; display: grid; gap: 6px; font-size: 13.5px;
@@ -456,6 +488,7 @@ footer { max-width: 1320px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 64px) 32
       </table>
     </div>
     <p class="map-note" id="mapNote" hidden></p>
+    <p class="map-note" id="mapHint" hidden>Two tokens for the same thing? Drag one row onto the other, or use <svg class="i inline" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6.5 15.5 11M8.5 17.5l7-4.5"/></svg> Group with&hellip;. Nothing is grouped unless you do it.</p>
   </section>
 </main>
 
@@ -531,6 +564,17 @@ footer { max-width: 1320px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 64px) 32
   </div>
 </dialog>
 
+<!-- Group with…: pick the token that is the same thing -->
+<dialog class="confirm grp" id="groupDlg" aria-labelledby="groupTitle" aria-describedby="groupHelp">
+  <h2 id="groupTitle">Group with&hellip;</h2>
+  <p class="quiet" id="groupHelp">Pick the token that stands for the same thing. The value gets a token under that one's number; its old token still restores.</p>
+  <input autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" translate="no" writingsuggestions="false" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" data-lt-active="false" data-ms-editor="false" id="groupFilter" type="search" placeholder="Filter token, type or value" aria-label="Filter tokens" aria-controls="groupList" aria-autocomplete="list" role="combobox" aria-expanded="true">
+  <ul class="grp-list" id="groupList" role="listbox" aria-label="Tokens to group with"></ul>
+  <p class="quiet" id="groupEmpty" hidden>No token to group with.</p>
+  <p class="quiet" id="groupNote" hidden></p>
+  <div class="row"><button class="btn ghost" type="button" id="groupCancel">Cancel</button></div>
+</dialog>
+
 <!-- Keyboard shortcuts -->
 <dialog class="pop" id="keys" aria-labelledby="keysTitle">
   <div class="pop-head">
@@ -550,6 +594,8 @@ footer { max-width: 1320px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 64px) 32
   <p class="quiet">Letter keys work when you are not typing in a box.</p>
 </dialog>
 
+<template id="tplGrip"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg></template>
+<template id="tplGroup"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6.5 15.5 11M8.5 17.5l7-4.5"/></svg></template>
 <template id="tplCopy"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></template>
 <!-- Select-to-add: appears next to a selection in the raw text or the unmasked part of the output -->
 <div class="seladd" id="selAdd" role="group" aria-label="Add the selected text as an entity" hidden>
@@ -576,7 +622,7 @@ const DEFAULT_NEVER_MASK = [];
 const GROUPS = ['secrets', 'cards', 'bvn', 'account', 'phones', 'emails', 'users', 'hosts', 'guids', 'sids', 'macs', 'ips'];
 // entNum: entity -> its number; sub: "LABEL_n" -> surface forms numbered so far; entTokens: tokens owned by entities.
 const S = { fwd: new Map(), rev: new Map(), cnt: {}, rows: [], byToken: new Map(), learned: new Set(),
-  entNum: new Map(), sub: new Map(), entTokens: new Set() };
+  entNum: new Map(), sub: new Map(), entTokens: new Set(), groupTokens: new Set() };
 let PH = [], RUN = { counts: {}, ent: {}, seen: new Map() }, CFG = { on: {} }, ALLOW = new Set();   // RUN: the last Mask only
 
 const WELL_KNOWN_DOMAINS = new Set(['nt authority','authority','builtin','nt service','service','window manager',
@@ -626,13 +672,14 @@ function mk(label, value, o = {}){
     S.cnt[label] = (S.cnt[label] || 0) + 1;
     t = '[' + label + '_' + S.cnt[label] + ']';
     S.fwd.set(key, t);
-    const row = { token: t, label, orig: o.oneWay ? null : value, seen: 0 };
+    const row = { token: t, label, type: label, orig: o.oneWay ? null : value, seen: 0 };
     S.rows.push(row); S.byToken.set(t, row);
     if (!o.oneWay) S.rev.set(t, value);
   }
-  S.byToken.get(t).seen++;
+  const r = S.byToken.get(t);   // after grouping, the value's current token (see groupTokens)
+  r.seen++;
   RUN.seen.set(t, (RUN.seen.get(t) || 0) + 1);
-  RUN.counts[label] = (RUN.counts[label] || 0) + 1;
+  RUN.counts[r.label] = (RUN.counts[r.label] || 0) + 1;
   return place(o.suffix ? t.slice(0, -1) + o.suffix + ']' : t);
 }
 
@@ -798,24 +845,25 @@ function entityTok(e, part, surface){
     const plain = '[' + base + ']';
     if (!k && S.rev.has(plain)){   // the plain token is this entity's first surface form
       k = 1;
-      S.fwd.set('=' + base + '|' + S.rev.get(plain), plain);
-      Object.assign(S.byToken.get(plain), { entity: e.key, part });
+      const pr = S.byToken.get(plain);
+      S.fwd.set('=' + base + '|' + S.rev.get(plain), currentToken(plain));
+      if (!pr.grouped) Object.assign(pr, { entity: e.key, part });
       S.entTokens.add(plain);
       t = S.fwd.get(fkey);
     }
     if (!t){
-      k++;
-      t = '[' + base + (k > 1 ? '.' + k : '') + ']';
+      do { k++; t = '[' + base + (k > 1 ? '.' + k : '') + ']'; } while (S.byToken.has(t));   // skip numbers grouping took
       S.fwd.set(fkey, t);
-      const row = { token: t, label, orig: surface, seen: 0, entity: e.key, part };
+      const row = { token: t, label, type: label, orig: surface, seen: 0, entity: e.key, part };
       S.rows.push(row); S.byToken.set(t, row); S.rev.set(t, surface);
       S.entTokens.add(t);
     }
     S.sub.set(base, k);
   }
-  S.byToken.get(t).seen++;
+  const r = S.byToken.get(t);
+  r.seen++;
   RUN.seen.set(t, (RUN.seen.get(t) || 0) + 1);
-  RUN.counts[label] = (RUN.counts[label] || 0) + 1;
+  RUN.counts[r.label] = (RUN.counts[r.label] || 0) + 1;
   RUN.ent[e.key] = (RUN.ent[e.key] || 0) + 1;
   return place(t);
 }
@@ -991,7 +1039,8 @@ function propagate(t){
     const label = tok.slice(1, tok.lastIndexOf('_'));
     const g = PROPAGATE[label];
     const low = orig.toLowerCase();
-    if (S.entTokens.has(tok)) continue;   // the entity detector already finds every form of an entity
+    if (S.entTokens.has(tok) || S.groupTokens.has(tok)) continue;   // entity passes find entity forms; a grouped value is
+    // re-masked through its old token's row, whose forward map now points at the group token
     if (!g || !CFG.on[g] || orig.length < 4 || /^\d+$/.test(orig) || PROP_STOP.has(low) || ALLOW.has(low)) continue;
     if (/\s/.test(orig)) multi.push([orig, label]); else if (!single.has(low)) single.set(low, [orig, label]);
   }
@@ -1235,6 +1284,91 @@ function restoreText(text){
   return res;
 }
 
+// ---- Manual grouping: the user says two tokens are the same thing. Nothing is ever grouped automatically. ----
+// The source value gets a new token under the target's root (same number = same thing):
+//   same type as the root   HOST into [HOST_1]        -> [HOST_1.2]   (next free sub-index)
+//   another type            USER jdoe into [PERSON_1] -> [PERSON_USER_1], PRIVATE_IP into [HOST_1] -> [HOST_PRIVATE_IP_1]
+// The value's forward map moves to the new token, so this and every later paste use it. The old token stays in the
+// reverse map as an alias, so text already pasted somewhere still restores. Ungroup returns the value to its first token.
+const tokNum = tok => parseInt(tok.slice(tok.lastIndexOf('_') + 1, -1), 10);
+function currentToken(tok){
+  for (let i = 0; i < 100; i++){ const r = S.byToken.get(tok); if (!r || !r.aliasOf) return tok; tok = r.aliasOf; }
+  return tok;
+}
+// A token's root, "LABEL_n": its group's root, or an entity part's entity ([PERSON_FIRST_1] -> PERSON_1), or itself.
+function rootOf(r){
+  if (r.root) return r.root;
+  const label = r.part ? r.label.slice(0, -(r.part.length + 1)) : r.label;
+  return label + '_' + tokNum(r.token);
+}
+function nextFree(base){
+  for (let k = 1; ; k++){
+    const t = k === 1 ? '[' + base + ']' : '[' + base + '.' + k + ']';
+    if (!S.byToken.has(t)){ if (k > (S.sub.get(base) || 0)) S.sub.set(base, k); return t; }
+  }
+}
+const liveRows = () => S.rows.filter(r => !r.aliasOf);
+// Why a source can't go into a target, or '' when it can.
+function groupBlock(src, dst){
+  const a = S.byToken.get(currentToken(src || '')), b = S.byToken.get(currentToken(dst || ''));
+  if (!a || !b) return 'That token is not in this session.';
+  if (a.orig === null || b.orig === null) return 'One-way tokens keep no value, so they can’t be grouped.';
+  if (a === b || rootOf(a) === rootOf(b)) return 'Those tokens are already in the same group.';
+  return '';
+}
+function moveRow(r, root){
+  const rootLabel = root.slice(0, root.lastIndexOf('_')), n = root.slice(root.lastIndexOf('_') + 1);
+  const type = r.type || r.label;
+  const label = type === rootLabel || type.startsWith(rootLabel + '_') ? type : rootLabel + '_' + type;
+  const t = nextFree(label + '_' + n);
+  const row = { token: t, label, type, orig: r.orig, seen: r.seen, root, grouped: true, original: r.original || r.token,
+    was: (r.was || []).concat(r.token), entity: r.entity, part: label === r.label ? r.part : '' };
+  S.rows.push(row); S.byToken.set(t, row); S.rev.set(t, r.orig); S.groupTokens.add(t);
+  for (const [k, v] of S.fwd) if (v === r.token) S.fwd.set(k, t);
+  for (const x of S.rows) if (x.aliasOf === r.token) x.aliasOf = t;
+  r.aliasOf = t;
+  // An entity moved under a root of its own type keeps growing there: new spellings get the root's number.
+  if (r.entity && !r.part && r.entity.slice(0, r.entity.indexOf('|')) === rootLabel) S.entNum.set(r.entity, +n);
+  return t;
+}
+function groupTokens(src, dst){
+  const why = groupBlock(src, dst);
+  if (why) return { ok: false, reason: why };
+  const a = S.byToken.get(currentToken(src)), b = S.byToken.get(currentToken(dst));
+  const root = rootOf(b), from = rootOf(a);
+  // A root brings its whole group with it (a merge); any other token moves alone.
+  const moving = a.token === '[' + from + ']' ? liveRows().filter(r => rootOf(r) === from) : [a];
+  const moved = moving.map(r => ({ from: r.token, to: moveRow(r, root) }));
+  return { ok: true, token: moved[0].to, root: '[' + root + ']', moved };
+}
+function ungroupToken(tok){
+  const r = S.byToken.get(currentToken(tok || ''));
+  if (!r || !r.grouped) return { ok: false, reason: 'That token is not in a group.' };
+  const o = S.byToken.get(r.original);
+  for (const [k, v] of S.fwd) if (v === r.token) S.fwd.set(k, o.token);
+  for (const x of S.rows) if (x.aliasOf === r.token) x.aliasOf = o.token;
+  r.aliasOf = o.token;
+  o.aliasOf = null;
+  o.was = (o.was || []).concat(r.token);
+  if (o.entity && !o.part && o.entity.slice(0, o.entity.indexOf('|')) === o.label) S.entNum.set(o.entity, tokNum(o.token));
+  return { ok: true, token: o.token };
+}
+// Rewrites tokens in already-masked text to their current tokens (after grouping, when the raw text is gone).
+const TOKEN_RE = /\[[A-Z][A-Z0-9_]*_\d+(?:\.\d+)?(?::\*{4}\d{4})?\]/g;
+function rewriteMasked(text){
+  const spans = [];
+  let out = '', last = 0;
+  for (const m of text.matchAll(TOKEN_RE)){
+    const base = baseToken(m[0]);
+    if (!S.byToken.has(base)) continue;
+    const cur = currentToken(base), shown = cur === base ? m[0] : cur;
+    out += text.slice(last, m.index);
+    spans.push({ start: out.length, end: out.length + shown.length, token: cur });
+    out += shown; last = m.index + m[0].length;
+  }
+  return { text: out + text.slice(last), spans };
+}
+
 // The report shown under the restored text. Built from the token lists only, so it never holds a real value.
 function restoreReport(r){
   if (r.mappingEmpty && r.unknown.length) return [{ kind: 'empty', text: 'The mapping is empty (the session ended, or this is a new tab), so nothing can be restored.' }];
@@ -1247,10 +1381,13 @@ function restoreReport(r){
 
 function clearSession(){
   S.fwd.clear(); S.rev.clear(); S.cnt = {}; S.rows = []; S.byToken.clear(); S.learned.clear();
-  S.entNum.clear(); S.sub.clear(); S.entTokens.clear(); RUN.ent = {}; RUN.seen = new Map();
+  S.entNum.clear(); S.sub.clear(); S.entTokens.clear(); S.groupTokens.clear(); RUN.ent = {}; RUN.seen = new Map();
 }
 
-const rowInfo = r => ({ token: r.token, label: r.label, value: r.orig, oneWay: r.orig === null, seen: r.seen, last: RUN.seen.get(r.token) || 0, entity: !!r.entity, part: r.part || '' });
+const rowInfo = r => ({ token: r.token, label: r.label, type: r.type || r.label, value: r.orig, oneWay: r.orig === null, seen: r.seen,
+  last: RUN.seen.get(r.token) || 0, entity: !!r.entity, part: r.part || '',
+  root: '[' + rootOf(r) + ']', grouped: !!r.grouped, alias: !!r.aliasOf, aliasOf: r.aliasOf ? currentToken(r.aliasOf) : null,
+  was: (r.was || []).slice(), original: r.original || r.token });
 
 // Sample data is fictional: example domains, documentation IP ranges and test card numbers.
 const SAMPLE = `2026-11-10T09:14:22Z sign-in UPN=jane.doe@contoso.com IP=203.0.113.45 Device=DESKTOP-7FQ2K9L
@@ -1280,11 +1417,18 @@ const PM = Object.freeze({
   clear: clearSession,
   // -> [{ token, label, value (null when one-way), oneWay, seen (this session), last (in the last Mask), entity, part ('', FIRST, LAST, USER) }]
   //    in creation order
+  //    root: the token's group root ([HOST_1]); grouped: made by grouping; alias: an old token kept only for restore,
+  //    aliasOf: the token that replaced it; was: the tokens this value had before; original: its first token
   rows: () => S.rows.map(rowInfo),
   lookup: token => { const r = S.byToken.get(token); return r ? rowInfo(r) : null; },
   size: () => S.rows.length,
   // The entity list is the custom-terms list. parseTerms(text) -> [{ term, label, key }], the same parsing configure() uses.
   parseTerms: text => parseTerms(text),
+  // Manual grouping. group -> { ok, token, root, moved: [{ from, to }], reason }; ungroup -> { ok, token, reason }.
+  group: (source, target) => groupTokens(source, target),
+  ungroup: token => ungroupToken(token),
+  canGroup: (source, target) => groupBlock(source, target),   // '' or the reason it isn't allowed
+  rewrite: text => rewriteMasked(String(text)),               // -> { text, spans } with current tokens
   entityTypes: ['PERSON', 'ORG', 'HOST', 'PROJECT', 'OTHER'],
 });
 configure({ terms: DEFAULT_TERMS, domains: DEFAULT_INTERNAL_DOMAINS, allow: DEFAULT_NEVER_MASK });
@@ -1304,10 +1448,11 @@ const CAT_ORDER = ['id', 'host', 'net', 'org', 'ref', 'ow'];
 const CAT_OF = { USER: 'id', PERSON: 'id', EMAIL: 'id', NETBIOS: 'id', HOST: 'host', TENANT: 'org', ORG_DOMAIN: 'org', TERM: 'org',
   PRIVATE_IP: 'net', PUBLIC_IP: 'net', MAC: 'net', GUID: 'ref', DOMAIN_SID: 'ref', ACCOUNT: 'ref', PHONE: 'ref' };
 // Anything else is a custom-term label (ORG, TEAM, ...), so it counts as organisation.
-const catOf = row => row.oneWay ? 'ow' : row.label.startsWith('AZ_') ? 'host' : /^PERSON(?:_|$)/.test(row.label) ? 'id' : (CAT_OF[row.label] || 'org');
+// Colour follows what the value is (its first type), also after it was grouped under another root.
+const catOf = row => { const L = row.type || row.label; return row.oneWay ? 'ow' : L.startsWith('AZ_') ? 'host' : /^PERSON(?:_|$)/.test(L) ? 'id' : (CAT_OF[L] || 'org'); };
 // "Identity · first name": the category, plus which entity form a token stands for.
 const PART_NAME = { FIRST: 'first name', LAST: 'last name', USER: 'username' };
-const typeText = row => CAT_NAME[catOf(row)] + (row.part ? ' \u00b7 ' + PART_NAME[row.part]
+const typeText = row => CAT_NAME[catOf(row)] + (row.grouped ? ' \u00b7 grouped' : row.part ? ' \u00b7 ' + PART_NAME[row.part]
   : row.entity ? ' \u00b7 ' + (row.label === 'PERSON' ? 'full name' : row.label === 'ORG' || row.label === 'HOST' ? 'entity' : row.label.toLowerCase().replace(/_/g, ' ')) : '');
 const TYPE_NAME = { PERSON: 'person', ORG: 'organisation', HOST: 'host', PROJECT: 'project', OTHER: 'other' };
 const entCat = label => label === 'PERSON' ? 'id' : label === 'HOST' ? 'host' : 'org';
@@ -1440,9 +1585,20 @@ function doMask(){
   PM.configure(readSettings());
   if (!text.trim()){ clearMasked(); toast('Paste some text first.'); return; }
   const r = PM.mask(text);
+  paintMasked(r.text, r.spans);
+  const entries = Object.entries(r.counts);
+  const st = $('maskStatus');
+  if (entries.length){ st.textContent = 'Masked: ' + entries.map(([k, v]) => v + ' ' + k).join(', '); st.className = 'status-line'; }
+  else { st.textContent = 'Nothing detected. Review it yourself before pasting.'; st.className = 'status-line warn'; }
+  lastEntityCounts = r.entities;
+  renderMap(); renderChips();
+}
+// Draws the masked output, its legend and badge. Also used after grouping, when the raw text is gone.
+function paintMasked(text, spans){
   const cats = new Map();
   const catFor = tok => { let c = cats.get(tok); if (!c){ c = rowCat(tok); cats.set(tok, c); } return c; };
-  const shown = renderOut('masked', r.text, r.spans, sp => 'tk c-' + catFor(sp.token));
+  const shown = renderOut('masked', text, spans, sp => 'tk c-' + catFor(sp.token));
+  const r = { spans };
   // Legend: token occurrences per category.
   const counts = {};
   for (const sp of r.spans){ const c = catFor(sp.token); counts[c] = (counts[c] || 0) + 1; }
@@ -1453,18 +1609,12 @@ function doMask(){
     return b;
   }));
   $('legend').hidden = !r.spans.length;
-  const entries = Object.entries(r.counts);
-  const st = $('maskStatus');
-  if (entries.length){ st.textContent = 'Masked: ' + entries.map(([k, v]) => v + ' ' + k).join(', '); st.className = 'status-line'; }
-  else { st.textContent = 'Nothing detected. Review it yourself before pasting.'; st.className = 'status-line warn'; }
   const note = $('maskNote');
   note.hidden = shown >= r.spans.length;
   note.textContent = note.hidden ? '' : `Highlighting the first ${shown.toLocaleString()} of ${r.spans.length.toLocaleString()} tokens; the rest show as plain text. Copy masked copies everything.`;
   const distinct = new Set(r.spans.map(s => s.token)).size;
   $('maskMeta').textContent = distinct ? plural(distinct, 'token') : 'nothing found';
   setPrimary('mask', true);
-  lastEntityCounts = r.entities;
-  renderMap(); renderChips();
 }
 
 function doRestore(){
@@ -1606,9 +1756,11 @@ $('legend').addEventListener('focusout', e => lit(e, false));
 
 // ---------- mapping table ----------
 function td(cls){ return el('td', cls); }
+function iconFrom(id){ return $(id).content.cloneNode(true); }
 function renderMap(){
-  const rows = PM.rows(), body = $('mapBody'), note = $('mapNote');
+  const rows = PM.rows().filter(r => !r.alias), body = $('mapBody'), note = $('mapNote');
   $('mapCount').textContent = rows.length ? plural(rows.length, 'token') + ', this tab only' : 'This tab only';
+  $('mapHint').hidden = rows.length < 2;
   note.hidden = true;
   if (!rows.length){
     const tr = el('tr'), c = td('val none full'); c.colSpan = 5;
@@ -1617,36 +1769,181 @@ function renderMap(){
   }
   const q = $('filter').value.trim().toLowerCase();
   // While values are hidden the filter matches tokens and types only, so it can't be used to probe for a value.
-  const match = q ? rows.filter(r => (r.token + ' ' + typeText(r) + ' ' + (r.oneWay ? 'one-way' : hideValues ? '' : r.value)).toLowerCase().includes(q)) : rows;
+  const match = q ? rows.filter(r => (r.token + ' ' + typeText(r) + ' ' + r.was.join(' ') + ' ' + (r.oneWay ? 'one-way' : hideValues ? '' : r.value)).toLowerCase().includes(q)) : rows;
+  // Grouped tokens are listed under their group's head: the root token's row, or, when there is none (an entity seen
+  // only as [PERSON_FIRST_1]), the first listed row of that root that wasn't grouped.
+  const head = new Map();
+  for (const r of match) if (r.token === r.root) head.set(r.root, r.token);
+  for (const r of match) if (!head.has(r.root) && !r.grouped) head.set(r.root, r.token);
+  const members = new Map(), nested = new Set();
+  for (const r of match){
+    const h = head.get(r.root);
+    if (r.grouped && h && h !== r.token){ const m = members.get(h); m ? m.push(r) : members.set(h, [r]); nested.add(r.token); }
+  }
+  const order = [];
+  for (const r of match){
+    if (nested.has(r.token)) continue;
+    order.push([r, '']);
+    const m = members.get(r.token);
+    if (m) m.forEach((x, k) => order.push([x, k === m.length - 1 ? 'member last' : 'member']));
+  }
   const frag = document.createDocumentFragment();
-  const tpl = $('tplCopy').content;
-  for (const r of match.slice(0, MAP_MAX)){
-    const cat = catOf(r), tr = el('tr');
-    const tok = td('tok'), tb = el('button', 'tk c-' + cat, r.token);
+  for (const [r, kind] of order.slice(0, MAP_MAX)){
+    const cat = catOf(r), tr = el('tr', kind);
+    tr.dataset.token = r.token;
+    const tok = td('tok');
+    const grip = el('span', 'grip' + (r.oneWay ? ' off' : ''));
+    grip.setAttribute('aria-hidden', 'true');
+    grip.append(iconFrom('tplGrip'));
+    if (!r.oneWay){ grip.draggable = true; grip.title = 'Drag onto another row to group them'; }
+    const tb = el('button', 'tk c-' + cat, r.token);
     tb.type = 'button'; tb.title = 'Copy token'; tb.setAttribute('aria-label', 'Copy token ' + r.token);
     tb.addEventListener('click', () => copy(r.token, 'Copied token ' + r.token));
-    tok.append(tb);
+    tok.append(grip, tb);
+    const m = members.get(r.token);
+    if (m) tok.append(el('span', 'grp-count', '+' + m.length));
+    if (r.was.length) tok.append(el('span', 'was', 'was ' + r.was.join(', ')));
     const typ = td('typ'); typ.append(el('span', 'sw c-' + cat), typeText(r));
     const val = td(r.oneWay ? 'val none' : 'val');
     if (r.oneWay) val.textContent = 'Not kept (one-way)';
     else if (hideValues){ const bar = el('span', 'redact'); bar.setAttribute('aria-label', 'Value hidden'); val.append(bar); }
     else val.append(el('span', '', r.value));
     // Times in the last Mask: re-masking the same text doesn't inflate it.
-    const num = td('num'); num.textContent = r.last ? r.last + '\u00d7' : '\u2013';
-    const act = td('act'), cb = el('button', 'icon-btn');
-    cb.type = 'button'; cb.append(tpl.cloneNode(true));
+    const num = td('num'); num.textContent = r.last ? r.last + '×' : '–';
+    const act = td('act');
+    if (r.grouped){
+      const ub = el('button', 'btn ghost sm ungroup', 'Ungroup');
+      ub.type = 'button'; ub.setAttribute('aria-label', 'Ungroup ' + r.token);
+      ub.addEventListener('click', () => doUngroup(r.token));
+      act.append(ub);
+    }
+    const gb = el('button', 'icon-btn grp-btn');
+    gb.type = 'button'; gb.append(iconFrom('tplGroup'));
+    gb.disabled = r.oneWay;
+    const oneWayWhy = 'One-way tokens keep no value, so they can’t be grouped';
+    gb.setAttribute('aria-label', r.oneWay ? oneWayWhy + ': ' + r.token : 'Group ' + r.token + ' with…');
+    gb.setAttribute('aria-haspopup', 'dialog');
+    gb.title = r.oneWay ? oneWayWhy : 'Group with…';
+    if (!r.oneWay) gb.addEventListener('click', () => openGroupDialog(r.token));
+    const cb = el('button', 'icon-btn');
+    cb.type = 'button'; cb.append(iconFrom('tplCopy'));
     cb.disabled = r.oneWay;
     cb.setAttribute('aria-label', r.oneWay ? 'No real value kept for ' + r.token : 'Copy real value of ' + r.token);
     cb.title = r.oneWay ? 'One-way: nothing to copy' : 'Copy real value';
     if (!r.oneWay) cb.addEventListener('click', () => copyValue(r));
-    act.append(cb);
+    act.append(gb, cb);
     tr.append(tok, typ, val, num, act);
     frag.append(tr);
   }
   if (!match.length){ const tr = el('tr'), c = td('val none full'); c.colSpan = 5; c.textContent = 'Nothing matches that filter.'; tr.append(c); frag.append(tr); }
   body.replaceChildren(frag);
-  if (match.length > MAP_MAX){ note.hidden = false; note.textContent = `Showing ${MAP_MAX} of ${match.length.toLocaleString()}. Filter to narrow.`; }
+  if (order.length > MAP_MAX){ note.hidden = false; note.textContent = `Showing ${MAP_MAX} of ${order.length.toLocaleString()}. Filter to narrow.`; }
 }
+
+// ---------- grouping: drag a row onto another, or "Group with…" ----------
+// Tokens only ever appear in toasts; values never do.
+function afterGrouping(){
+  if ($('input').value.trim()) doMask();
+  else {
+    if (view.masked){ const w = PM.rewrite(view.masked.text); paintMasked(w.text, w.spans); }
+    renderMap();
+  }
+}
+function doGroup(src, dst){
+  const r = PM.group(src, dst);
+  if (!r.ok){ toast(r.reason); return false; }
+  afterGrouping();
+  toast(r.moved.length > 1 ? `Grouped ${r.moved.length} tokens from ${src} into ${dst}` : `Grouped ${src} into ${dst} as ${r.token}`);
+  return true;
+}
+function doUngroup(tok){
+  const r = PM.ungroup(tok);
+  if (!r.ok) return toast(r.reason);
+  afterGrouping();
+  toast(`Ungrouped ${tok}; it is ${r.token} again`);
+}
+let dragSrc = null, dropRow = null;
+const clearDrop = () => { if (dropRow) dropRow.classList.remove('drop-ok', 'drop-no'); dropRow = null; };
+$('mapBody').addEventListener('dragstart', e => {
+  const g = e.target.closest && e.target.closest('.grip'), tr = g && g.closest('tr');
+  if (!tr){ e.preventDefault(); return; }
+  dragSrc = tr.dataset.token;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', dragSrc);
+  e.dataTransfer.setDragImage(tr, 20, 20);
+  tr.classList.add('dragging');
+});
+$('mapBody').addEventListener('dragover', e => {
+  const tr = dragSrc && e.target.closest('tr[data-token]');
+  if (!tr) return;
+  if (tr !== dropRow){ clearDrop(); dropRow = tr; }
+  const ok = tr.dataset.token !== dragSrc && !PM.canGroup(dragSrc, tr.dataset.token);
+  tr.classList.toggle('drop-ok', ok); tr.classList.toggle('drop-no', !ok);
+  if (ok){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } else e.dataTransfer.dropEffect = 'none';
+});
+$('mapBody').addEventListener('dragleave', e => { const tr = e.target.closest('tr[data-token]'); if (tr && tr === dropRow && !tr.contains(e.relatedTarget)) clearDrop(); });
+$('mapBody').addEventListener('drop', e => {
+  const tr = e.target.closest('tr[data-token]');
+  e.preventDefault();
+  const src = dragSrc; dragSrc = null; clearDrop();
+  if (tr && src && tr.dataset.token !== src) doGroup(src, tr.dataset.token);
+});
+$('mapBody').addEventListener('dragend', () => { dragSrc = null; clearDrop(); document.querySelectorAll('#mapBody .dragging').forEach(x => x.classList.remove('dragging')); });
+
+// "Group with…": a list of valid targets with a filter; arrows move, Enter or a click groups, Esc cancels.
+let groupSrc = null, groupActive = 0, groupOpts = [];
+function openGroupDialog(tok){
+  groupSrc = tok;
+  $('groupTitle').textContent = 'Group ' + tok + ' with…';
+  $('groupFilter').value = '';
+  openModal($('groupDlg'), 'groupFilter');
+  paintGroupList();
+}
+function paintGroupList(){
+  const q = $('groupFilter').value.trim().toLowerCase();
+  const all = PM.rows().filter(r => !r.alias && !r.oneWay && !PM.canGroup(groupSrc, r.token));
+  const match = q ? all.filter(r => (r.token + ' ' + typeText(r) + ' ' + (hideValues ? '' : r.value)).toLowerCase().includes(q)) : all;
+  groupOpts = match.slice(0, 200);
+  groupActive = Math.min(groupActive, Math.max(groupOpts.length - 1, 0));
+  const ul = $('groupList');
+  ul.replaceChildren(...groupOpts.map((r, i) => {
+    const li = el('li', 'grp-opt');
+    li.id = 'gopt-' + i; li.setAttribute('role', 'option'); li.setAttribute('aria-selected', String(i === groupActive));
+    const cat = catOf(r);
+    li.append(el('span', 'tk c-' + cat, r.token), el('span', 'grp-type'));
+    li.lastChild.append(el('span', 'sw c-' + cat), typeText(r));
+    if (hideValues){ const bar = el('span', 'redact sm'); bar.setAttribute('aria-label', 'Value hidden'); li.append(bar); }
+    else li.append(el('span', 'grp-val', r.value));
+    li.addEventListener('mousedown', ev => ev.preventDefault());   // keep focus in the filter box
+    li.addEventListener('click', () => pickGroup(i));
+    return li;
+  }));
+  $('groupFilter').setAttribute('aria-activedescendant', groupOpts.length ? 'gopt-' + groupActive : '');
+  $('groupEmpty').hidden = groupOpts.length > 0;
+  $('groupNote').hidden = match.length <= groupOpts.length;
+  $('groupNote').textContent = `Showing ${groupOpts.length} of ${match.length.toLocaleString()}. Filter to narrow.`;
+  const act = ul.children[groupActive];
+  if (act) act.scrollIntoView({ block: 'nearest' });
+}
+function pickGroup(i){
+  const r = groupOpts[i], src = groupSrc;
+  if (!r) return;
+  $('groupDlg').close();
+  doGroup(src, r.token);
+  // The table was redrawn: return focus to the moved token's row (the dialog's close handler runs after this).
+  const now = (PM.rows().find(x => x.token === src) || {}).aliasOf || src;
+  returnFocus = document.querySelector(`#mapBody tr[data-token="${now}"] .grp-btn`) || $('filter');
+}
+$('groupFilter').addEventListener('input', () => { groupActive = 0; paintGroupList(); });
+$('groupFilter').addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    groupActive = Math.max(0, Math.min(groupOpts.length - 1, groupActive + (e.key === 'ArrowDown' ? 1 : -1)));
+    paintGroupList();
+  } else if (e.key === 'Enter'){ e.preventDefault(); pickGroup(groupActive); }
+});
+$('groupCancel').addEventListener('click', () => $('groupDlg').close());
+$('groupDlg').addEventListener('close', () => { groupSrc = null; groupActive = 0; $('groupList').replaceChildren(); });
 $('filter').addEventListener('input', renderMap);
 $('hideBtn').addEventListener('click', () => {
   hideValues = !hideValues;
@@ -1788,12 +2085,12 @@ function openModal(d, focusId){
   d.showModal();
   if (focusId) $(focusId).focus();
 }
-for (const d of [$('settings'), $('confirmEnd')]){
+for (const d of [$('settings'), $('confirmEnd'), $('groupDlg')]){
   d.addEventListener('close', () => { if (returnFocus && returnFocus.isConnected) returnFocus.focus(); returnFocus = null; });
   // A click on the backdrop lands on the dialog element itself.
   d.addEventListener('click', e => { if (e.target === d) d.close(); });
 }
-const modalOpen = () => $('settings').open || $('confirmEnd').open;
+const modalOpen = () => $('settings').open || $('confirmEnd').open || $('groupDlg').open;
 const openSettings = () => openModal($('settings'), 'closeSettings');
 $('settingsBtn').addEventListener('click', openSettings);
 $('settingsSummary').addEventListener('click', openSettings);

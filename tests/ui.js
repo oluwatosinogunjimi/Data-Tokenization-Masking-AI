@@ -125,7 +125,7 @@ async function main(){
     const rowCount = await page.locator('#mapBody tr').count();
     check('mapping lists every token', rowCount === ref.PM.size(), `${rowCount} rows`);
     check('one-way rows have no value and no copy', (await page.locator('#mapBody td.val.none', { hasText: 'Not kept (one-way)' }).count()) > 0 && (await page.locator('#mapBody button.icon-btn[disabled]').count()) > 0);
-    await page.locator('#mapBody tr', { hasText: host.token }).first().locator('button.icon-btn').click();
+    await page.locator('#mapBody tr', { hasText: host.token }).first().locator('button.icon-btn:not(.grp-btn)').click();
     check('mapping copy button copies the real value', (await clip(page)) === host.value);
     await page.mouse.click(5, 500);
     await page.keyboard.press('/');
@@ -236,6 +236,46 @@ async function main(){
     check('entity toasts never contain the entity', toasts.length >= 5 && toasts.every(t => !/Grace|Northwind|Jane/.test(t)), toasts.join(' | '));
     check('the entity list stays in sync after removal', (await chips()) === 2 && !(await page.inputValue('#terms')).includes('Northwind'));
 
+    // ---------- Grouping in the mapping table ----------
+    const rowOf = tok => page.locator(`#mapBody tr[data-token="${tok}"]`);
+    const hostRows = await page.evaluate(() => PM.rows().filter(r => r.label === 'HOST' && !r.alias).map(r => [r.token, r.value]));
+    const [h1, h1v] = hostRows[0], [h2, h2v] = hostRows[1];
+    await rowOf(h2).locator('.grip').dragTo(rowOf(h1));
+    const g1 = await page.evaluate(t => PM.rows().find(r => r.token === t).aliasOf, h2);
+    check('dragging a row onto another groups it', /^\[HOST_\d+\.2\]$/.test(g1 || '') && (await maskedText()).includes(g1) && !(await maskedText()).includes(h2), g1);
+    const tg = await toastText(page);
+    check('the group toast names tokens only', tg === `Grouped ${h2} into ${h1} as ${g1}` && !tg.includes(h2v), tg);
+    const order = await page.locator('#mapBody tr').evaluateAll(trs => trs.map(t => t.dataset.token + (t.classList.contains('member') ? '*' : '')));
+    check('a grouped row is nested under its root, which shows a count', order[order.indexOf(h1) + 1] === g1 + '*' && (await rowOf(h1).locator('.grp-count').textContent()) === '+1');
+    check('the grouped row shows its old token', (await rowOf(g1).locator('.was').textContent()) === 'was ' + h2);
+    const pip = await page.evaluate(() => PM.rows().find(r => r.label === 'PRIVATE_IP' && !r.alias).token);
+    await rowOf(pip).locator('.grp-btn').focus();
+    await page.keyboard.press('Enter');
+    check('Group with… opens a dialog with the filter focused', await page.evaluate(() => document.getElementById('groupDlg').open && document.activeElement.id === 'groupFilter'));
+    const opts = await page.locator('#groupList li').allTextContents();
+    check('Group with… lists only valid targets', opts.length > 3 && !opts.some(t => t.startsWith(pip) || /\[(SECRET|TOKEN|JWT|CARD|BVN)_/.test(t)));
+    await page.keyboard.type(h1.slice(1, -1).toLowerCase());
+    await page.keyboard.press('Enter');
+    const g2 = await page.evaluate(t => PM.rows().find(r => r.token === t).aliasOf, pip);
+    check('Group with… groups across types with the keyboard', /^\[HOST_PRIVATE_IP_\d+\]$/.test(g2 || '') && (await maskedText()).includes(g2) && await page.evaluate(() => !document.getElementById('groupDlg').open), g2);
+    check('focus returns to the table after grouping', await page.evaluate(() => !!document.activeElement.closest('#mapBody, .map')));
+    const sec = await page.evaluate(() => PM.rows().find(r => r.label === 'SECRET').token);
+    check('one-way rows cannot be grouped, with a reason', await rowOf(sec).locator('.grp-btn').isDisabled() && /One-way/.test(await rowOf(sec).locator('.grp-btn').getAttribute('title')));
+    await page.click('#hideBtn');
+    await rowOf(h1).locator('.grp-btn').click();
+    const dlgText = await page.textContent('#groupList');
+    check('Hide values hides values in Group with…', (await page.locator('#groupList .grp-val').count()) === 0 && (await page.locator('#groupList .redact').count()) > 0 && !dlgText.includes(h2v) && !dlgText.includes('jdoe'));
+    await page.keyboard.press('Escape');
+    check('Esc cancels Group with…', await page.evaluate(() => !document.getElementById('groupDlg').open) && (await page.evaluate(() => PM.rows().filter(r => r.grouped && !r.alias).length)) === 2);
+    await page.click('#hideBtn');
+    const back = await page.evaluate(([a, b]) => PM.restore(`old ${a}, new [host ${b.slice(6, -1)}]`).text, [h2, g1]);
+    check('old and new tokens both restore', back === `old ${h2v}, new ${h2v}`, back);
+    await rowOf(g1).locator('.ungroup').click();
+    const tu = await toastText(page);
+    check('Ungroup returns the value to its first token', (await maskedText()).includes(h2) && !(await maskedText()).includes(g1) && tu === `Ungrouped ${g1}; it is ${h2} again`, tu);
+    await rowOf(g2).locator('.ungroup').click();
+    check('ungrouped rows leave the group display', (await page.locator('#mapBody tr.member').count()) === 0);
+
     // ---------- Shortcuts panel and tabs ----------
     await page.mouse.click(5, 500);
     await page.keyboard.press('?');
@@ -314,6 +354,11 @@ async function main(){
     check('no horizontal scroll at 390px (Mask)', !(await overflow()));
     await page.locator('#masked .tk').nth(2).tap();
     check('tap pins the popover with copy buttons', await page.evaluate(() => document.getElementById('pv').classList.contains('pinned')) && (await page.locator('#pv button').count()) >= 1);
+    const mrows = await page.evaluate(() => PM.rows().filter(r => r.label === 'HOST' && !r.alias).map(r => r.token));
+    check('drag handles are hidden on touch screens', !(await page.locator('#mapBody .grip').first().isVisible()));
+    await page.locator(`#mapBody tr[data-token="${mrows[1]}"] .grp-btn`).tap();
+    await page.locator('#groupList li', { hasText: mrows[0] }).first().tap();
+    check('Group with… works by touch at 390px', /\.2\]$/.test(await page.evaluate(t => PM.rows().find(r => r.token === t).aliasOf || '', mrows[1])) && !(await overflow()));
     await page.click('#tab-restore');
     check('no horizontal scroll at 390px (Restore)', !(await overflow()));
     await page.click('#settingsBtn');
